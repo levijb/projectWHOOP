@@ -1,10 +1,47 @@
+# Virtual Environment
 venv/
+env/
+ENV/
+
+# Credentials - IMPORTANT!
 .env
-*.pyc
+*.env
+
+# Python
 __pycache__/
-.ipynb_checkpoints/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb_checkpoints/
+
+# Data files (don't commit large data)
 data/raw/*
+data/processed/*
 !data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# Models (can be large)
+data/models/*.pkl
+data/models/*.joblib
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Logs
+*.log
+logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
