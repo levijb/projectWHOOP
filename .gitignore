@@ -1,3 +1,29 @@
+# === PROJECT SPECIFIC ===
+
+# Whoop API responses (contains personal health data)
+data/raw/*.json
+data/raw/*.csv
+
+# Processed features (personal data)
+data/processed/*.csv
+data/processed/*.parquet
+data/processed/*.pkl
+
+# Trained models (can be large)
+*.pkl
+*.joblib
+*.h5
+*.pth
+
+# Database files (if using SQLite locally)
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/*.log
+*.log
+
 # Virtual Environment
 venv/
 env/
