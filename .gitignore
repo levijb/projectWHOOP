@@ -28,4 +28,4 @@ dist/
 Thumbs.db
 
 # Data (optional - uncomment if you don't want to track raw data)
-# data/raw/
+data/raw/
