@@ -39,4 +39,7 @@ Build an intelligent system that:
    - Impact of sleep consistency on recovery
    - Strain-recovery balance over time
 
+5. **Visualization:**
+   - Make attractive, informative visualizations of health trends
+   - Create dashboard to be updated daily
 ---
