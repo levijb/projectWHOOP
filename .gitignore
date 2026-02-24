@@ -1,0 +1,31 @@
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Environment variables / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (optional - uncomment if you don't want to track raw data)
+# data/raw/
