@@ -1,18 +1,18 @@
 # **ProjectWHOOP**
-**"Personalized Recovery and Performance Optimization System: Multi-Dimensional Analysis of Physiological Readiness Using Whoop Wearable Data"**
+**"Analysis of Personal Physiology Measurements Using Whoop Wristband Data"**
 
 ---
 
 ## **Project Overview**
 
-**Objective:**
-Build an intelligent system that:
-1. Collects comprehensive Whoop data via API
-2. Stores in structured SQL database
-3. Performs time-series analysis
-4. Predicts future readiness states
-5. Provides personalized recommendations
-6. Visualizes long-term trends
+**Objectives:**
+1. Collect comprehensive data via Whoop API
+2. Store data in structured SQL database
+3. Automate weekly data download + database update
+4. Visualize weekly, monthly, long-term trends
+5. Perform time-series analysis of sleep, recovery, and strain
+6. Train models to predict future states and provide personalized recommendations
+8. Create dashboard 
 
 
 ---
@@ -20,26 +20,24 @@ Build an intelligent system that:
 ## **Core Research Questions**
 
 1. **Predictive Modeling: Recovery Score Prediction with Continuous Learning**
-   - **Objective:** Build an adaptive, self-improving recovery prediction system that mimics Whoop's proprietary algorithm through iterative learning from personal physiological data. Design a system to implement continuous learning where the model evolves daily, learning from prediction errors and adapting to your changing physiology, behaviors, and fitness level over time.
+   - Build an adaptive, self-improving recovery prediction system that mimics Whoop's algorithm through iterative learning from personal physiological data. Design a system to implement continuous learning where the model evolves daily, learning from prediction errors and adapting to your changing physiology, behaviors, and fitness level over time.
 
-
-
-2. **Pattern Recognition:**
+3. **Pattern Recognition:**
    - What behaviors most impact recovery? (quantified)
    - Identify weekly/monthly cycles in performance
    - Detect early warning signs of overtraining
 
-3. **Optimization:**
+4. **Optimization:**
    - What's the ideal sleep duration for maximum recovery?
    - How does strain distribution (steady vs. spiky) affect recovery?
    - Optimal timing for high-strain activities?
 
-4. **Correlational Analysis:**
+5. **Correlational Analysis:**
    - Relationship between HRV trends and illness
    - Impact of sleep consistency on recovery
    - Strain-recovery balance over time
 
-5. **Visualization:**
+6. **Visualization:**
    - Make attractive, informative visualizations of health trends
    - Create dashboard to be updated daily
 ---
