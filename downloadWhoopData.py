@@ -12,6 +12,13 @@ from datetime import datetime
 import json
 
 from dotenv import load_dotenv
+from pathlib import Path
+
+
+# Load .env from project root
+env_path = Path(__file__).parent / ".env"
+load_dotenv(env_path)
+
 
 # Add parent directory to path for local imports
 sys.path.append('../')
@@ -20,7 +27,7 @@ from src.whoop_client import WhoopClient
 from src.whoop_oauth import get_whoop_access_token
 
 
-def authenticate(env_path: str = '../.env') -> str:
+def authenticate(env_path: str = './.env') -> str:
     """
     Authenticate with WHOOP API and return access token.
     Updates the .env file with the new token.
@@ -107,7 +114,7 @@ def main():
     """
     Main entry point for the script.
     """
-    env_path = '../.env'
+    env_path = './.env'
     
     # Load environment and check for existing token
     load_dotenv(env_path, override=True)
