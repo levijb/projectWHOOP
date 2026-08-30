@@ -37,3 +37,12 @@ Thumbs.db
 # Local wearable data and databases must never be committed.
 data/**
 !data/.gitkeep
+
+# dbt build artifacts
+dbt/target/
+dbt/logs/
+dbt/dbt_packages/
+dbt/.user.yml
+
+# Dagster local dev instance state
+.dagster_home/

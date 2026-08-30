@@ -11,6 +11,10 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "projectWHOOP contributors" }]
 dependencies = [
+  "dagster>=1.13,<2",
+  "dagster-dbt>=0.29,<0.30",
+  "dbt-core>=1.9,<1.11",
+  "dbt-duckdb>=1.9,<1.11",
   "duckdb>=1.1,<2",
   "numpy>=1.24,<3",
   "pandas>=2.1,<4",
@@ -41,6 +45,9 @@ whoop-download = "whoop_pipeline.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/whoop_pipeline"]
+
+[tool.dagster]
+module_name = "whoop_pipeline.orchestration.definitions"
 
 [tool.pytest.ini_options]
 addopts = "--strict-config --strict-markers"
@@ -80,4 +87,10 @@ warn_unused_ignores = true
 [[tool.mypy.overrides]]
 module = ["duckdb.*", "pandera.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# dagster's own documented ConfigurableResource usage never parametrizes the class (it's
+# Generic[TResValue] for the factory pattern, which these plain resources don't use).
+module = ["whoop_pipeline.orchestration.resources"]
+disable_error_code = ["type-arg"]
 

@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: mart_daily_features
+    description: >
+      One row per cycle_id with ML feature-engineering columns (rolling averages, lags,
+      day-of-week, rest-day recency) for the Phase 3 recovery-prediction model.
+    columns:
+      - name: cycle_id
+        tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: source('whoop_gold', 'daily_summary')
+                field: cycle_id
+      - name: day_of_week
+        tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 6
+      - name: recovery_score_7d_avg
+        tests:
+          - accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 100

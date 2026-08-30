@@ -1,0 +1,10 @@
+whoop_features:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      # Overridden by Dagster (real data/processed/whoop.db) and by the pytest integration
+      # test (a throwaway tmp_path database) via WHOOP_DUCKDB_PATH. The default assumes dbt
+      # is invoked with this directory as its working/project directory.
+      path: "{{ env_var('WHOOP_DUCKDB_PATH', '../data/processed/whoop.db') }}"
+      threads: 1

@@ -1,0 +1,88 @@
+version: 2
+
+sources:
+  - name: whoop_gold
+    description: >
+      Gold-layer WHOOP tables written by whoop_pipeline.storage.duckdb_loader. These are
+      Pandera-validated Python outputs, not dbt models — dbt only builds on top of them.
+      Each table maps to the single upstream `gold_tables` Dagster asset (via meta.dagster
+      below) so the orchestration graph shows feature_marts genuinely depending on it,
+      instead of the dependency being hidden behind a subprocess call.
+    schema: main
+    tables:
+      - name: cycles
+        description: One row per WHOOP physiological cycle.
+        meta:
+          dagster:
+            asset_key: ["gold_tables"]
+        columns:
+          - name: cycle_id
+            tests: [unique, not_null]
+          - name: user_id
+            tests: [not_null]
+          - name: strain
+            tests:
+              - accepted_range:
+                  arguments:
+                    min_value: 0
+                    max_value: 21
+      - name: recovery
+        description: One row per recovery score, keyed by cycle_id.
+        meta:
+          dagster:
+            asset_key: ["gold_tables"]
+        columns:
+          - name: cycle_id
+            tests: [unique, not_null]
+          - name: recovery_score
+            tests:
+              - accepted_range:
+                  arguments:
+                    min_value: 0
+                    max_value: 100
+          - name: spo2_percentage
+            tests:
+              - accepted_range:
+                  arguments:
+                    min_value: 0
+                    max_value: 100
+      - name: sleep
+        description: One row per sleep activity, including naps (is_nap = true).
+        meta:
+          dagster:
+            asset_key: ["gold_tables"]
+        columns:
+          - name: sleep_id
+            tests: [unique, not_null]
+          - name: cycle_id
+            tests: [not_null]
+          - name: sleep_performance_percentage
+            tests:
+              - accepted_range:
+                  arguments:
+                    min_value: 0
+                    max_value: 100
+      - name: workouts
+        description: One row per workout activity. Has no cycle_id (dropped in WHOOP v2).
+        meta:
+          dagster:
+            asset_key: ["gold_tables"]
+        columns:
+          - name: workout_id
+            tests: [unique, not_null]
+          - name: percent_recorded
+            tests:
+              - accepted_range:
+                  arguments:
+                    min_value: 0
+                    max_value: 100
+      - name: daily_summary
+        description: >
+          View joining cycles/recovery/main-sleep/workout-aggregates on cycle_id. Built by
+          whoop_pipeline.storage.duckdb_loader, not dbt.
+        meta:
+          dagster:
+            asset_key: ["gold_tables"]
+        columns:
+          - name: cycle_id
+            tests: [unique, not_null]

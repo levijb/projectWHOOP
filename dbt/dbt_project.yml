@@ -1,0 +1,15 @@
+name: "whoop_features"
+version: "1.0.0"
+config-version: 2
+profile: "whoop_features"
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "logs"]
+
+models:
+  whoop_features:
+    marts:
+      +materialized: table
