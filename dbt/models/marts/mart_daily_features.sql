@@ -1,10 +1,18 @@
 {#
-    ML feature-engineering mart for the recovery-prediction phase (Phase 3). One row per
+    ML feature-engineering mart for the recovery-prediction phase (Phase 4). One row per
     cycle_id, built entirely from the already-validated daily_summary source -- no bronze/
     silver/gold logic is reimplemented here, only derived features on top of it.
 
     Feature set and the "low strain" threshold (8.0, on WHOOP's 0-21 strain scale) are
     documented judgment calls; see SESSION_2_SUMMARY.md for rationale.
+
+    Written to compile against both the dev (DuckDB) and prod (Postgres) targets: day_of_week
+    uses the day_of_week() macro (DuckDB and Postgres spell that function differently), and
+    the rest-day lookback uses max() instead of last_value(... ignore nulls), since Postgres
+    doesn't support IGNORE NULLS -- max() is equivalent here because low_strain_day_index is
+    built from a monotonically increasing row_number(), so the largest non-null value seen so
+    far in start_at order is also the most recent one. Tests compile prod offline and
+    cross-check its SQL on fixture DuckDB; real Postgres still needs a manual smoke test.
 #}
 
 with daily as (
@@ -40,7 +48,7 @@ select
     cycle_id,
     user_id,
     start_at,
-    dayofweek(start_at) as day_of_week,
+    {{ day_of_week('start_at') }} as day_of_week,
 
     cycle_strain,
     recovery_score,
@@ -73,7 +81,7 @@ select
 
     -- Cycles since the last day with cycle_strain < 8.0 ("rest day"); 0 on a rest day itself,
     -- null before the first rest day is observed.
-    day_index - last_value(low_strain_day_index ignore nulls) over (
+    day_index - max(low_strain_day_index) over (
         order by start_at rows between unbounded preceding and current row
     ) as days_since_last_low_strain_day
 

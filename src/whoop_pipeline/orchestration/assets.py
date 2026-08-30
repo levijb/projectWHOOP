@@ -16,8 +16,7 @@ import pandas as pd
 from dagster import AssetExecutionContext, MetadataValue, ResourceParam, asset
 
 from whoop_pipeline.ingestion import determine_sync_start
-from whoop_pipeline.storage.bronze import read_sync_state, update_sync_state, write_bronze_pull
-from whoop_pipeline.storage.duckdb_loader import load_silver_frames
+from whoop_pipeline.storage.bronze import write_bronze_pull
 from whoop_pipeline.transform.flatten import (
     flatten_cycles,
     flatten_recovery,
@@ -25,7 +24,7 @@ from whoop_pipeline.transform.flatten import (
     flatten_workouts,
 )
 
-from .resources import PipelinePathsResource, WhoopDataSource, WhoopRecords
+from .resources import GoldStorageBackend, PipelinePathsResource, WhoopDataSource, WhoopRecords
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,17 +43,22 @@ class SilverFrames:
     recovery: pd.DataFrame
     sleep: pd.DataFrame
     workouts: pd.DataFrame
+    pull_date: date
 
 
 @asset
 def raw_whoop_data(
     context: AssetExecutionContext,
     whoop: ResourceParam[WhoopDataSource],
-    paths: PipelinePathsResource,
+    storage: ResourceParam[GoldStorageBackend],
 ) -> RawWhoopPull:
-    """Fetch the incremental window's records via the injected, swappable data source."""
+    """Fetch the incremental window's records via the injected, swappable data source.
+
+    Sync state is read from ``storage`` (the gold backend), not a hardcoded local file, so
+    LocalBackend and PostgresBackend each track incremental progress in their own store.
+    """
     end = datetime.now(UTC)
-    last_synced_date = read_sync_state(data_dir=paths.data_dir)
+    last_synced_date = storage.read_sync_state()
     start = determine_sync_start(today=end.date(), last_synced_date=last_synced_date)
     records = whoop.fetch_all(start, end)
     context.add_output_metadata(
@@ -69,7 +73,7 @@ def bronze_partitions(
     raw_whoop_data: RawWhoopPull,
     paths: PipelinePathsResource,
 ) -> RawWhoopPull:
-    """Write atomic bronze JSONL partitions and advance sync state.
+    """Write atomic bronze JSONL partitions without advancing the gold checkpoint.
 
     Passes the records through unchanged so silver_frames doesn't need to re-read them from
     disk -- the bronze write is a durability side effect, not the only copy of the data.
@@ -77,7 +81,6 @@ def bronze_partitions(
     output_paths = write_bronze_pull(
         raw_whoop_data.records, pull_date=raw_whoop_data.pull_date, data_dir=paths.data_dir
     )
-    update_sync_state(raw_whoop_data.pull_date, data_dir=paths.data_dir)
     context.add_output_metadata(
         {name: MetadataValue.path(str(path)) for name, path in output_paths.items()}
     )
@@ -93,6 +96,7 @@ def silver_frames(bronze_partitions: RawWhoopPull) -> SilverFrames:
         recovery=flatten_recovery(records["recovery"]),
         sleep=flatten_sleep(records["sleep"]),
         workouts=flatten_workouts(records["workouts"]),
+        pull_date=bronze_partitions.pull_date,
     )
 
 
@@ -100,17 +104,17 @@ def silver_frames(bronze_partitions: RawWhoopPull) -> SilverFrames:
 def gold_tables(
     context: AssetExecutionContext,
     silver_frames: SilverFrames,
-    paths: PipelinePathsResource,
+    storage: ResourceParam[GoldStorageBackend],
 ) -> None:
-    """Validate (Pandera) and idempotently upsert into DuckDB via Phase 1's loader."""
-    output_path = load_silver_frames(
+    """Validate (Pandera) and idempotently upsert via whichever gold backend is configured."""
+    storage.load_gold(
         silver_frames.cycles,
         silver_frames.recovery,
         silver_frames.sleep,
         silver_frames.workouts,
-        database_path=paths.database_path,
+        last_synced_date=silver_frames.pull_date,
     )
-    context.add_output_metadata({"database_path": MetadataValue.path(str(output_path))})
+    context.add_output_metadata({"backend": MetadataValue.text(type(storage).__name__)})
 
 
 __all__ = [

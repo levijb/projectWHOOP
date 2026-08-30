@@ -8,3 +8,17 @@ whoop_features:
       # is invoked with this directory as its working/project directory.
       path: "{{ env_var('WHOOP_DUCKDB_PATH', '../data/processed/whoop.db') }}"
       threads: 1
+    prod:
+      # Dagster and whoop-dbt derive these from DATABASE_URL, only after explicit opt-in.
+      # Empty defaults allow credential-free dev parsing; they are not usable prod settings.
+      type: postgres
+      host: "{{ env_var('WHOOP_PGHOST', '') }}"
+      port: "{{ env_var('WHOOP_PGPORT', '5432') | int }}"
+      user: "{{ env_var('WHOOP_PGUSER', '') }}"
+      password: "{{ env_var('DBT_ENV_SECRET_WHOOP_PASSWORD', '') }}"
+      dbname: "{{ env_var('WHOOP_PGDATABASE', '') }}"
+      schema: whoop
+      sslmode: "{{ env_var('WHOOP_PGSSLMODE', 'require') }}"
+      sslrootcert: "{{ env_var('WHOOP_PGSSLROOTCERT', '') }}"
+      connect_timeout: "{{ env_var('WHOOP_PGCONNECT_TIMEOUT', '10') | int }}"
+      threads: 1

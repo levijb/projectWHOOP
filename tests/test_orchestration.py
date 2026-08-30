@@ -20,7 +20,11 @@ from whoop_pipeline.orchestration.assets import (
     silver_frames,
 )
 from whoop_pipeline.orchestration.dbt_assets import DBT_PROJECT_DIR, feature_marts
-from whoop_pipeline.orchestration.resources import FixtureWhoopResource, PipelinePathsResource
+from whoop_pipeline.orchestration.resources import (
+    FixtureWhoopResource,
+    LocalBackend,
+    PipelinePathsResource,
+)
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -36,9 +40,8 @@ def test_full_asset_graph_materializes_with_fixture_resource_and_zero_credential
         [raw_whoop_data, bronze_partitions, silver_frames, gold_tables, feature_marts],
         resources={
             "whoop": FixtureWhoopResource(fixtures_dir=str(FIXTURES_DIR)),
-            "paths": PipelinePathsResource(
-                data_dir=str(data_dir), database_path=str(database_path)
-            ),
+            "paths": PipelinePathsResource(data_dir=str(data_dir)),
+            "storage": LocalBackend(data_dir=str(data_dir)),
             "dbt": DbtCliResource(project_dir=str(DBT_PROJECT_DIR)),
         },
     )
@@ -69,5 +72,25 @@ def test_definitions_default_to_fixture_resource_without_explicit_opt_in(
     importlib.reload(definitions)
     try:
         assert isinstance(definitions.defs.resources["whoop"], FixtureWhoopResource)
+    finally:
+        importlib.reload(definitions)
+
+
+def test_definitions_default_to_local_backend_without_explicit_postgres_opt_in(
+    monkeypatch: object,
+) -> None:
+    """Same regression guarantee as the fixture-resource test above, for Postgres: a real
+    DATABASE_URL merely being present (this repo's .env has one as of Phase 3, for the
+    human's own reference) must never cause a real connection attempt on its own."""
+    monkeypatch.delenv("WHOOP_PIPELINE_USE_POSTGRES", raising=False)  # type: ignore[attr-defined]
+    monkeypatch.setenv("DATABASE_URL", "postgresql://not-a-real-host/checking-the-gate")  # type: ignore[attr-defined]
+
+    import importlib
+
+    from whoop_pipeline.orchestration import definitions
+
+    importlib.reload(definitions)
+    try:
+        assert isinstance(definitions.defs.resources["storage"], LocalBackend)
     finally:
         importlib.reload(definitions)

@@ -11,16 +11,20 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "projectWHOOP contributors" }]
 dependencies = [
+  "alembic>=1.13,<2",
   "dagster>=1.13,<2",
   "dagster-dbt>=0.29,<0.30",
   "dbt-core>=1.9,<1.11",
   "dbt-duckdb>=1.9,<1.11",
+  "dbt-postgres>=1.9,<1.11",
   "duckdb>=1.1,<2",
   "numpy>=1.24,<3",
   "pandas>=2.1,<4",
   "pandera[pandas]>=0.22,<0.29",
+  "psycopg2-binary>=2.9,<3",
   "python-dotenv>=1.0,<2",
   "requests>=2.31,<3",
+  "sqlalchemy>=2.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +46,7 @@ notebooks = [
 
 [project.scripts]
 whoop-download = "whoop_pipeline.cli:main"
+whoop-dbt = "whoop_pipeline.dbt_cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/whoop_pipeline"]
@@ -93,4 +98,3 @@ ignore_missing_imports = true
 # Generic[TResValue] for the factory pattern, which these plain resources don't use).
 module = ["whoop_pipeline.orchestration.resources"]
 disable_error_code = ["type-arg"]
-

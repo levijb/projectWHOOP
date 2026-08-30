@@ -1,7 +1,7 @@
 """Manual-only WHOOP OAuth bootstrap; never used by tests or CI."""
 
 from whoop_pipeline.config import WhoopConfig
-from whoop_pipeline.oauth import get_whoop_access_token
+from whoop_pipeline.oauth import get_whoop_token_pair
 
 
 def main() -> int:
@@ -10,13 +10,15 @@ def main() -> int:
     )
     if config.client_id is None or config.client_secret is None:
         raise RuntimeError("Validated WHOOP OAuth configuration unexpectedly missing")
-    token = get_whoop_access_token(
+    tokens = get_whoop_token_pair(
         config.client_id,
         config.client_secret,
         "http://localhost:3000/callback",
     )
-    print("Authorization succeeded. Store this access token in your local .env only:")
-    print(token)
+    print("Authorization succeeded. Store these bootstrap values securely; never commit them:")
+    print(f"WHOOP_ACCESS_TOKEN={tokens.access_token}")
+    print(f"WHOOP_REFRESH_TOKEN={tokens.refresh_token}")
+    print(f"Access token expires at {tokens.expires_at.isoformat()}")
     return 0
 
 

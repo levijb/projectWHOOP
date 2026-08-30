@@ -12,13 +12,15 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
-from dagster import AssetExecutionContext
+from dagster import AssetExecutionContext, ResourceParam
 from dagster_dbt import DbtCliResource, DbtProject, dbt_assets
+
+from .resources import GoldStorageBackend, LocalBackend
 
 REPO_ROOT_DBT_DIR = Path(__file__).resolve().parents[3] / "dbt"
 DBT_PROJECT_DIR = Path(os.environ.get("WHOOP_DBT_PROJECT_DIR", str(REPO_ROOT_DBT_DIR)))
 
-whoop_dbt_project = DbtProject(project_dir=DBT_PROJECT_DIR)
+whoop_dbt_project = DbtProject(project_dir=DBT_PROJECT_DIR, target="dev")
 whoop_dbt_project.prepare_if_dev()
 # prepare_if_dev() only regenerates the manifest under `dagster dev`. Outside that (pytest,
 # `dagster job execute`, a fresh checkout), fall back to generating it once if it's missing --
@@ -28,8 +30,23 @@ if not whoop_dbt_project.manifest_path.exists():
 
 
 @dbt_assets(manifest=whoop_dbt_project.manifest_path)
-def feature_marts(context: AssetExecutionContext, dbt: DbtCliResource) -> Iterator[Any]:
-    yield from dbt.cli(["build"], context=context).stream()
+def feature_marts(
+    context: AssetExecutionContext,
+    dbt: DbtCliResource,
+    storage: ResourceParam[GoldStorageBackend],
+) -> Iterator[Any]:
+    # Keep dbt on the exact DuckDB file the injected local backend just wrote, even if a
+    # user changes resource paths in the Dagster UI. Restore the process environment after.
+    previous = os.environ.get("WHOOP_DUCKDB_PATH")
+    if isinstance(storage, LocalBackend):
+        os.environ["WHOOP_DUCKDB_PATH"] = str(storage.resolved_database_path.resolve())
+    try:
+        yield from dbt.cli(["build"], context=context).stream()
+    finally:
+        if previous is None:
+            os.environ.pop("WHOOP_DUCKDB_PATH", None)
+        else:
+            os.environ["WHOOP_DUCKDB_PATH"] = previous
 
 
 __all__ = ["DBT_PROJECT_DIR", "feature_marts", "whoop_dbt_project"]

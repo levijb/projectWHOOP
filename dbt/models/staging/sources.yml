@@ -3,12 +3,12 @@ version: 2
 sources:
   - name: whoop_gold
     description: >
-      Gold-layer WHOOP tables written by whoop_pipeline.storage.duckdb_loader. These are
+      Gold-layer WHOOP tables written by the selected Python storage backend. These are
       Pandera-validated Python outputs, not dbt models — dbt only builds on top of them.
       Each table maps to the single upstream `gold_tables` Dagster asset (via meta.dagster
       below) so the orchestration graph shows feature_marts genuinely depending on it,
       instead of the dependency being hidden behind a subprocess call.
-    schema: main
+    schema: "{{ target.schema }}"
     tables:
       - name: cycles
         description: One row per WHOOP physiological cycle.
@@ -79,7 +79,7 @@ sources:
       - name: daily_summary
         description: >
           View joining cycles/recovery/main-sleep/workout-aggregates on cycle_id. Built by
-          whoop_pipeline.storage.duckdb_loader, not dbt.
+          the Python loader (DuckDB) or Alembic migration (Postgres), not dbt.
         meta:
           dagster:
             asset_key: ["gold_tables"]
