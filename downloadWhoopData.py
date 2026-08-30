@@ -82,7 +82,7 @@ def connect_client(env_path: str = '../.env') -> WhoopClient:
         return None
 
 
-def fetch_and_save_data(client: WhoopClient, days_back: int = 1000, output_dir: str = '../data/raw') -> dict:
+def fetch_and_save_data(client: WhoopClient, days_back: int = 1000, output_dir: str = './data/raw') -> dict:
     """
     Fetch all historical data and save to JSON file.
     """
@@ -137,7 +137,7 @@ def main():
         sys.exit(1)
     
     # Fetch and save data
-    fetch_and_save_data(client, days_back=1000)
+    fetch_and_save_data(client, days_back=100)
 
 
 if __name__ == '__main__':
