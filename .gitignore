@@ -15,6 +15,13 @@ build/
 dist/
 *.egg-info/
 
+# Test/lint/type-check caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
 # Jupyter Notebooks
 .ipynb_checkpoints/
 
@@ -27,5 +34,6 @@ dist/
 .DS_Store
 Thumbs.db
 
-# Data (optional - uncomment if you don't want to track raw data)
-data/raw/
+# Local wearable data and databases must never be committed.
+data/**
+!data/.gitkeep
