@@ -1,0 +1,39 @@
+name: Scheduled WHOOP pipeline
+
+# Separate from ci.yml (push/PR lint+test, no secrets) -- this workflow builds and runs the
+# Docker image against real WHOOP credentials. It cannot succeed until a human adds the four
+# secrets below in repo settings (see NEXT_STEPS_FOR_HUMAN.md); that is expected, not a bug.
+#
+# Known characteristics of `schedule:`, not defects: GitHub's cron scheduling is best-effort
+# and can be delayed under load, and scheduled workflows on public repos are automatically
+# disabled after 60 days with no repository activity (any push re-enables them).
+on:
+  schedule:
+    - cron: "0 6 * * *" # once daily, 06:00 UTC
+  workflow_dispatch: {} # lets a human trigger a run manually once secrets are configured
+
+permissions:
+  contents: read
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build pipeline image
+        run: docker build -t whoop-pipeline .
+      - name: Run pipeline
+        env:
+          WHOOP_CLIENT_ID: ${{ secrets.WHOOP_CLIENT_ID }}
+          WHOOP_CLIENT_SECRET: ${{ secrets.WHOOP_CLIENT_SECRET }}
+          WHOOP_ACCESS_TOKEN: ${{ secrets.WHOOP_ACCESS_TOKEN }}
+          WHOOP_REFRESH_TOKEN: ${{ secrets.WHOOP_REFRESH_TOKEN }}
+        run: |
+          docker run --rm \
+            -e WHOOP_CLIENT_ID \
+            -e WHOOP_CLIENT_SECRET \
+            -e WHOOP_ACCESS_TOKEN \
+            -e WHOOP_REFRESH_TOKEN \
+            -e WHOOP_PIPELINE_USE_LIVE_CLIENT=true \
+            whoop-pipeline

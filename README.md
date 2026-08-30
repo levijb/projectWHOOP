@@ -60,6 +60,7 @@ WHOOP v2 (manual credentials, runtime only)
   -> typed pandas silver transforms + Pandera contracts
   -> data/processed/whoop.db
        cycles | recovery | sleep | workouts | daily_summary view
+       -> dbt marts (mart_daily_features: rolling averages, lags, rest-day recency)
 ```
 
 - `src/whoop_pipeline/client.py` provides injected HTTP transport, bounded retry behavior, and
@@ -79,6 +80,31 @@ The detailed field contract and aggregation choices are in [docs/data_model.md](
 helpers. They're kept for now because `notebooks/WHOOP_EDA.ipynb` still imports them directly;
 see [NEXT_STEPS_FOR_HUMAN.md](NEXT_STEPS_FOR_HUMAN.md) for the plan to retire them once that
 notebook is migrated to `whoop_pipeline`.
+
+## Phase 2: feature marts and orchestration
+
+Phase 2 adds a feature-engineering layer on top of the Phase 1 gold tables, and makes the
+pipeline runnable end to end instead of only by hand.
+
+- `dbt/` is a dbt project that declares `cycles`, `recovery`, `sleep`, `workouts`, and
+  `daily_summary` as **sources** (Phase 1's Python code owns that logic; dbt only builds on
+  top of it) and defines `mart_daily_features`, the feature set the Phase 3 recovery-prediction
+  model will consume.
+- `src/whoop_pipeline/orchestration/` wires the Phase 1 functions into Dagster software-defined
+  assets: `raw_whoop_data -> bronze_partitions -> silver_frames -> gold_tables ->
+  mart_daily_features` (the last via `dagster-dbt`, so dbt's lineage is a first-class part of
+  the graph, not hidden behind a subprocess call). The WHOOP data source is a swappable
+  resource; it defaults to Phase 1's test fixtures and only uses the real client when
+  `WHOOP_PIPELINE_USE_LIVE_CLIENT` is explicitly set (see
+  [docs/orchestration.md](docs/orchestration.md) for why that's a separate flag from credential
+  presence).
+- `Dockerfile` packages the pipeline as a one-shot job (`dagster job execute`), not a
+  persistent server.
+- `.github/workflows/scheduled-pipeline.yml` runs that image on a daily cron, separate from the
+  existing push/PR `ci.yml`.
+
+Full details, including how to run the asset graph locally with zero credentials, are in
+[docs/orchestration.md](docs/orchestration.md).
 
 ### Install and verify
 
@@ -110,6 +136,6 @@ Local `.env`, bronze files, sync state, and DuckDB databases are ignored by Git.
 
 ### Scope
 
-Phase 1 does not include machine learning, dbt, orchestration, Postgres, dashboards, scheduled
-live pulls, LangChain, or Databricks. Those belong to later phases (including the recovery
-prediction work described above) after the local ingestion contract is proven stable.
+As of Phase 2, dbt feature marts and Dagster/Docker/scheduled-CI orchestration are in place.
+Still explicitly out of scope: machine learning, Postgres (deferred until a serving layer
+actually needs one -- likely Phase 3, alongside MLflow), dashboards, LangChain, and Databricks.

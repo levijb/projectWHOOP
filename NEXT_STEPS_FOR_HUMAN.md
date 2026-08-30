@@ -27,3 +27,32 @@ To finish retiring the old client:
 This is a deliberate follow-up task, not something done automatically as part of the Phase 1
 merge — rewriting a notebook's cells isn't a mechanical change.
 
+## Phase 2: enabling the scheduled pipeline
+
+The scheduled workflow (`.github/workflows/scheduled-pipeline.yml`) builds the Docker image and
+runs it daily, but **cannot succeed yet** — it references four repo secrets that don't exist.
+To enable it:
+
+1. In GitHub repo settings → Secrets and variables → Actions, add:
+   - `WHOOP_CLIENT_ID`
+   - `WHOOP_CLIENT_SECRET`
+   - `WHOOP_ACCESS_TOKEN`
+   - `WHOOP_REFRESH_TOKEN`
+   (same values as your local `.env`, from the steps above.)
+2. Note that the current pipeline uses `WHOOP_ACCESS_TOKEN` as-is; it does not yet refresh an
+   expired access token from `WHOOP_REFRESH_TOKEN` before running. Access tokens are
+   short-lived, so a truly unattended daily schedule will eventually need that refresh logic —
+   that's token-lifecycle work for a future session, not solved here.
+3. Once the secrets exist, either wait for the daily cron or trigger it manually from the
+   Actions tab (`workflow_dispatch` is enabled).
+4. Before trusting scheduled runs, verify the Dockerfile itself with a real `docker build` —
+   it was written and its individual commands were verified outside a container, but Docker
+   isn't installed on the machine this was built on, so the image itself has never actually
+   been built.
+
+**Postgres is intentionally not part of Phase 2.** It was originally slated for this phase as a
+"serving layer," but nothing in the project needs to write predictions or serve a dashboard
+yet. It's deferred to whichever phase first actually needs a queryable store for something
+beyond local DuckDB — most likely Phase 3, alongside MLflow. This is a deliberate scope
+decision, not an oversight.
+
