@@ -52,6 +52,18 @@ to `sslmode=require`; for certificate identity verification use `sslmode=verify-
 
 ### 2. Run the one-time real-Postgres smoke test yourself
 
+**After the `daily_summary` ambiguity fix:** the never-applied `0001` migration has been
+corrected in place. Rotate the database password exposed in the pasted terminal command and
+update your local `DATABASE_URL` (and any Actions secret) before retrying. No database cleanup,
+`stamp`, `downgrade`, or migration bypass is required for the reported failed first migration.
+Do not add implicit dotenv loading to Alembic; use the explicit dotenv runner below if the
+updated URL is only in `.env`. If the old URL is still set in this PowerShell session, remove
+that stale environment variable first so `--no-override` does not preserve it.
+
+Your next database action is simply **rerun `alembic upgrade head`**, or its dotenv-wrapped
+equivalent below, with `WHOOP_PIPELINE_USE_POSTGRES=true`. The fixture/Postgres combination
+should only be used in a disposable test database, never to seed the production history.
+
 **These commands deliberately contact your database and, in the second step, WHOOP. They
 were not run during development.** Do not run a local production job concurrently with
 Actions or another program refreshing the same token pair. Close any token-refreshing notebook.

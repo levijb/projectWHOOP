@@ -188,6 +188,47 @@ The complete local Dagster/dbt graph is exercised against temporary data. Tests 
 Python sockets and native psycopg2 connections; Windows asyncio loopback remains allowed.
 The suite strips inherited credentials before collection and disables dbt telemetry.
 
+### Postgres SQL review and embedded-engine regression
+
+The first human smoke test exposed a gap in the DuckDB cross-check: Postgres rejects the
+final `USING (cycle_id)` when a preceding sleep `JOIN ... ON` leaves both `c.cycle_id` and
+`s.cycle_id` on the join's left side. DuckDB accepted it. Both view definitions now explicitly
+join workout aggregates with `ON c.cycle_id = w.cycle_id`. Workouts have no stored `cycle_id`;
+the temporal assignment remains authoritative. This incident was not caused by `EXCLUDE`.
+
+When reviewing raw Postgres migrations or dbt's `prod` SQL:
+
+- Check join-column scope after every join. Prefer an explicit qualified key when a joined
+  relation can contain duplicate names; a later `USING` does not know which alias you intend.
+- Enumerate workout CTE columns alongside its computed cycle ID instead of forwarding `w.*`.
+- Do not carry DuckDB-only syntax such as `* EXCLUDE (...)`, `dayofweek(...)`, or
+  `last_value(... IGNORE NULLS)` into Postgres SQL. Review the rendered production SQL.
+- Verify on a PostgreSQL engine when possible. Successful parsing/execution in DuckDB or
+  SQLite does not establish PostgreSQL compatibility.
+
+`tests/test_postgres_runtime.py` adds an optional PostgreSQL-engine check using
+[PGlite](https://pglite.dev/docs/), a local in-memory WASM runtime. It runs the complete emitted
+Alembic migration, inserts fixture-derived rows, and compares all view columns and values with
+DuckDB. Cases include missing main sleep, overlapping/open-ended cycles, a cycle with no
+workouts, exact interval boundaries, gaps, and unmatched workouts. Node sockets and fetch are
+blocked; neither `.env` nor any live database is used.
+
+To enable it in PowerShell with Node installed, install the test-only package in a temporary
+directory (not the application or Docker image):
+
+```powershell
+$env:PROJECTWHOOP_PGLITE_DIR = Join-Path $env:TEMP ("whoop-pglite-" + [guid]::NewGuid())
+npm install --prefix $env:PROJECTWHOOP_PGLITE_DIR --ignore-scripts --no-audit --no-fund @electric-sql/pglite@0.5.8
+python -m pytest -q tests/test_postgres_runtime.py
+```
+
+With that variable set, the full `pytest` suite includes these three cases. Without it, the
+existing Python-only CI still runs normally and explicitly skips the three optional cases.
+Installation uses the npm registry; test execution is offline. On this Windows machine npm
+needed Node's `--use-system-ca` option to trust the installed CA; TLS verification was not
+disabled. Native Postgres, Supabase permissions/TLS/pooler behavior, and Docker still require
+the human smoke test. See [SESSION_3_FIX_SUMMARY.md](../SESSION_3_FIX_SUMMARY.md).
+
 A non-editable wheel and the one-shot Dagster/dbt commands are additionally checked from a
 scratch directory without `.env`. **No live Postgres or WHOOP connection is part of this
 verification. Docker itself remains unbuilt/unverified.**

@@ -23,6 +23,7 @@ The gating flag is `WHOOP_PIPELINE_USE_POSTGRES` (mirroring Phase 2's
 def is_enabled(flag_name: str) -> bool:
     return os.environ.get(flag_name, "").strip().lower() in ("1", "true", "yes")
 
+
 def require_postgres_opt_in() -> str:
     if not is_enabled("WHOOP_PIPELINE_USE_POSTGRES"):
         raise RuntimeError("Set WHOOP_PIPELINE_USE_POSTGRES=true to explicitly enable Postgres")

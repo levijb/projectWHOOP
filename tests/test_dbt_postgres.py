@@ -12,6 +12,7 @@ from typing import Any
 
 import duckdb
 import pytest
+import sqlparse
 from alembic import command
 from alembic.config import Config
 from dbt.cli.main import dbtRunner
@@ -65,9 +66,11 @@ def test_prod_model_compiles_offline_and_matches_fixture_features(
     monkeypatch.setenv("DATABASE_URL", url)
     output = StringIO()
     command.upgrade(Config(str(ROOT / "alembic.ini"), output_buffer=output), "head", sql=True)
-    view_sql = (
-        "CREATE VIEW whoop.daily_summary"
-        + output.getvalue().split("CREATE VIEW whoop.daily_summary", 1)[1].split(";", 1)[0]
+    # Parse SQL statement boundaries: a semicolon inside a comment is not a terminator.
+    view_sql = next(
+        statement
+        for statement in sqlparse.split(output.getvalue())
+        if statement.lstrip().startswith("CREATE VIEW whoop.daily_summary")
     )
 
     database_path = tmp_path / "offline_db.duckdb"

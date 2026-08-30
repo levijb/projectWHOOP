@@ -93,7 +93,11 @@ def _create_daily_summary_view(connection: duckdb.DuckDBPyConnection) -> None:
         workout_assignments AS (
             SELECT
                 c.cycle_id,
-                w.*,
+                w.workout_id,
+                w.strain,
+                w.kilojoule,
+                w.start_at,
+                w.end_at,
                 ROW_NUMBER() OVER (
                     PARTITION BY w.workout_id
                     ORDER BY c.start_at DESC
@@ -164,6 +168,7 @@ def _create_daily_summary_view(connection: duckdb.DuckDBPyConnection) -> None:
         LEFT JOIN recovery AS r USING (cycle_id)
         LEFT JOIN ranked_main_sleep AS s
             ON c.cycle_id = s.cycle_id AND s.row_number = 1
-        LEFT JOIN workout_by_cycle AS w USING (cycle_id)
+        -- Match the Postgres view: the sleep join leaves two cycle_id columns on the left.
+        LEFT JOIN workout_by_cycle AS w ON c.cycle_id = w.cycle_id
         """
     )

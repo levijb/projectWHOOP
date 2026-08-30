@@ -150,7 +150,11 @@ def upgrade() -> None:
             workout_assignments AS (
                 SELECT
                     c.cycle_id,
-                    w.*,
+                    w.workout_id,
+                    w.strain,
+                    w.kilojoule,
+                    w.start_at,
+                    w.end_at,
                     ROW_NUMBER() OVER (
                         PARTITION BY w.workout_id
                         ORDER BY c.start_at DESC
@@ -221,7 +225,9 @@ def upgrade() -> None:
             LEFT JOIN whoop.recovery AS r USING (cycle_id)
             LEFT JOIN ranked_main_sleep AS s
                 ON c.cycle_id = s.cycle_id AND s.row_number = 1
-            LEFT JOIN workout_by_cycle AS w USING (cycle_id)
+            -- The sleep ON join leaves both c.cycle_id and s.cycle_id on the left.
+            -- USING (cycle_id) is ambiguous in Postgres; anchor aggregates to the cycle.
+            LEFT JOIN workout_by_cycle AS w ON c.cycle_id = w.cycle_id
             """
         )
 
