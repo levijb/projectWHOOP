@@ -27,32 +27,151 @@ To finish retiring the old client:
 This is a deliberate follow-up task, not something done automatically as part of the Phase 1
 merge — rewriting a notebook's cells isn't a mechanical change.
 
-## Phase 2: enabling the scheduled pipeline
+## Phase 3: verify and enable persistent scheduled runs
 
-The scheduled workflow (`.github/workflows/scheduled-pipeline.yml`) builds the Docker image and
-runs it daily, but **cannot succeed yet** — it references four repo secrets that don't exist.
-To enable it:
+The implementation is complete locally, but **the real database, Docker image, and hosted
+schedule are not verified**. No secrets were added or workflow dispatched by the build session.
+Phase 4 (ML) follows this operator verification.
 
-1. In GitHub repo settings → Secrets and variables → Actions, add:
-   - `WHOOP_CLIENT_ID`
-   - `WHOOP_CLIENT_SECRET`
-   - `WHOOP_ACCESS_TOKEN`
-   - `WHOOP_REFRESH_TOKEN`
-   (same values as your local `.env`, from the steps above.)
-2. Note that the current pipeline uses `WHOOP_ACCESS_TOKEN` as-is; it does not yet refresh an
-   expired access token from `WHOOP_REFRESH_TOKEN` before running. Access tokens are
-   short-lived, so a truly unattended daily schedule will eventually need that refresh logic —
-   that's token-lifecycle work for a future session, not solved here.
-3. Once the secrets exist, either wait for the daily cron or trigger it manually from the
-   Actions tab (`workflow_dispatch` is enabled).
-4. Before trusting scheduled runs, verify the Dockerfile itself with a real `docker build` —
-   it was written and its individual commands were verified outside a container, but Docker
-   isn't installed on the machine this was built on, so the image itself has never actually
-   been built.
+Use the active Git checkout:
+`C:\Users\levij\Documents\Personal\Code\projectWHOOP`.
+The similarly named `Documents\GitHub\projectWHOOP` directory is an older Phase 1 copy.
 
-**Postgres is intentionally not part of Phase 2.** It was originally slated for this phase as a
-"serving layer," but nothing in the project needs to write predictions or serve a dashboard
-yet. It's deferred to whichever phase first actually needs a queryable store for something
-beyond local DuckDB — most likely Phase 3, alongside MLflow. This is a deliberate scope
-decision, not an oversight.
+### 1. Keep production credentials private
 
+Your local `.env` already has a `DATABASE_URL` key. Its value was not inspected or used.
+Confirm yourself that it is a Postgres connection string, not the Supabase HTTPS project URL.
+Use your provider's connection method appropriate for this machine/Actions runner, URL-encode
+special characters in the password, and retain TLS. Do not paste credentials into a task or
+commit them.
+
+The code supports `postgres://`, `postgresql://`, and `postgresql+psycopg2://`. It defaults
+to `sslmode=require`; for certificate identity verification use `sslmode=verify-full` and
+`sslrootcert` pointing to an available CA file. Only `sslmode`, `sslrootcert`, and
+`connect_timeout` query options are supported. Check pooler/TLS compatibility in the smoke test.
+
+### 2. Run the one-time real-Postgres smoke test yourself
+
+**These commands deliberately contact your database and, in the second step, WHOOP. They
+were not run during development.** Do not run a local production job concurrently with
+Actions or another program refreshing the same token pair. Close any token-refreshing notebook.
+
+From the active checkout in PowerShell, install/update the package and set the explicit flags.
+The dotenv runner loads your existing file only for each child process; `--no-override`
+preserves the flags explicitly set in your shell.
+
+```powershell
+python -m pip install -e ".[dev]"
+$env:WHOOP_PIPELINE_USE_POSTGRES = "true"
+$env:WHOOP_PIPELINE_USE_LIVE_CLIENT = "false"
+python -m dotenv -f .env run --no-override alembic upgrade head
+```
+
+This creates the private `whoop` schema and Alembic version tracker. Use a database role with
+schema/table creation rights. Do not enable this schema in Supabase's Data API or grant access
+to anonymous/authenticated API roles. A pre-existing conflicting `whoop` schema needs human
+review; do not delete it blindly. Future schema changes require new Alembic migrations.
+Do not run `alembic downgrade` against your production history.
+
+Now enable the live client **before** materializing, so synthetic fixture IDs are not inserted:
+
+```powershell
+$env:WHOOP_PIPELINE_USE_LIVE_CLIENT = "true"
+python -m dotenv -f .env run --no-override dagster job execute -j whoop_pipeline_job -m whoop_pipeline.orchestration.definitions
+```
+
+On the first run, the backend exchanges your bootstrap refresh token and immediately persists
+the rotated pair. A valid bootstrap refresh token plus client ID/secret are required; the
+bootstrap access token is optional for this path. If reauthorization is needed, manually run
+`python scripts/authenticate.py` and securely store its access **and refresh** tokens.
+Do not run that helper routinely: stored Postgres tokens are authoritative after bootstrap.
+
+In your database SQL editor, verify row counts/checkpoints without displaying token values:
+
+```sql
+SELECT 'cycles' AS relation, count(*) AS rows, count(DISTINCT cycle_id) AS distinct_ids
+FROM whoop.cycles
+UNION ALL
+SELECT 'recovery', count(*), count(DISTINCT cycle_id) FROM whoop.recovery
+UNION ALL
+SELECT 'sleep', count(*), count(DISTINCT sleep_id) FROM whoop.sleep
+UNION ALL
+SELECT 'workouts', count(*), count(DISTINCT workout_id) FROM whoop.workouts
+UNION ALL
+SELECT 'mart_daily_features', count(*), count(DISTINCT cycle_id) FROM whoop.mart_daily_features;
+
+SELECT count(*) AS daily_rows FROM whoop.daily_summary;
+SELECT last_synced_date FROM whoop.sync_state WHERE id = 1;
+SELECT count(*) AS stored_pairs, min(expires_at) AS token_expires_at FROM whoop.whoop_tokens;
+```
+
+Expect one checkpoint and one token pair, equal row/distinct-ID counts for each relation, and
+one mart/daily-summary row per cycle. For an account with data in the backfill window, counts
+should be nonzero. Run the same Dagster command again in a new process and confirm history is
+retained without duplicate IDs. WHOOP may add/correct records between runs, so counts need
+not be identical. Check that dbt's source/mart tests pass and its target is `prod`.
+
+Also perform a later run after the token expires and confirm the stored expiry advances.
+Do not edit tokens or expiry artificially in production merely to force a refresh.
+
+When done, reset local defaults before any fixture development:
+
+```powershell
+$env:WHOOP_PIPELINE_USE_LIVE_CLIENT = "false"
+$env:WHOOP_PIPELINE_USE_POSTGRES = "false"
+```
+
+Leave flags false/unset in the normal local `.env`. See
+[docs/orchestration.md](docs/orchestration.md) for safe, separate fixture-data paths.
+
+### 3. Verify the Docker image
+
+Docker was not installed or used during this session. When available:
+
+```bash
+docker build -t whoop-pipeline .
+docker run --rm whoop-pipeline
+```
+
+The default fixture run must succeed without credentials. The non-container wheel,
+multiprocess Dagster job, dbt build, and dbt docs generation were checked separately; that
+does not verify Docker's Linux image or its Python 3.11 dependency resolution.
+
+### 4. Configure GitHub Actions only after the smoke test
+
+Review/push the local commits, then add repository Actions secrets:
+
+| Secret | Purpose |
+|---|---|
+| `DATABASE_URL` | The tested Postgres connection string |
+| `WHOOP_PIPELINE_USE_POSTGRES` | Exactly `true`; workflow refuses to fall back to ephemeral local storage |
+| `WHOOP_CLIENT_ID` | Required for future token refreshes |
+| `WHOOP_CLIENT_SECRET` | Required for future token refreshes |
+| `WHOOP_REFRESH_TOKEN` | Initial bootstrap only; no longer authoritative once Postgres holds a pair |
+| `WHOOP_ACCESS_TOKEN` | Optional bootstrap/local-live compatibility value; not needed by the persistent first refresh |
+
+The workflow sets `WHOOP_PIPELINE_USE_LIVE_CLIENT=true` itself. Rotated token values are kept
+in Postgres, never written back into GitHub secrets. Keep database backups and credentials
+protected. Never upload `data/`, token query results, or unredacted runtime logs as artifacts.
+
+Trigger `Scheduled WHOOP pipeline` manually from Actions once, verify the persisted counts
+and checkpoint, and then trust the daily 06:00 UTC schedule. GitHub scheduling is best-effort;
+public-repository schedules may be disabled after 60 days of inactivity. Workflow concurrency
+prevents overlapping Actions jobs; it does not coordinate independent local runs.
+
+### Recovery and remaining limits
+
+This is one WHOOP account and one writer. Gold and checkpoint commits are atomic in Postgres.
+If dbt fails after gold commits, rerun the job (or `whoop-dbt build --target prod` with the
+Postgres opt-in); it rebuilds the complete mart from durable gold.
+
+A crash after WHOOP rotates tokens but before the database saves them may require manual
+reauthorization and deliberate replacement of the stale stored pair. Changing bootstrap
+secrets alone will not override an existing database pair. Do not delete stored tokens as
+routine troubleshooting; first confirm the failure and stop competing refreshers.
+
+Raw bronze files and Dagster run history remain ephemeral in scheduled containers. The initial
+backfill is 180 days; Phase 3 does not migrate older local DuckDB history automatically.
+SQLite/offline SQL tests cannot verify provider permissions, real Postgres behavior, TLS,
+transaction-pooler behavior, or token rotation against the live provider. Complete these checks
+before Phase 4 assumes the deployed pipeline is persistent.

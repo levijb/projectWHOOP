@@ -1,8 +1,8 @@
 name: Scheduled WHOOP pipeline
 
 # Separate from ci.yml (push/PR lint+test, no secrets) -- this workflow builds and runs the
-# Docker image against real WHOOP credentials. It cannot succeed until a human adds the four
-# secrets below in repo settings (see NEXT_STEPS_FOR_HUMAN.md); that is expected, not a bug.
+# Docker image against real WHOOP credentials and persistent Postgres. A human must migrate
+# and smoke-test the database and add the secrets below before relying on the schedule.
 #
 # Known characteristics of `schedule:`, not defects: GitHub's cron scheduling is best-effort
 # and can be delayed under load, and scheduled workflows on public repos are automatically
@@ -14,6 +14,11 @@ on:
 
 permissions:
   contents: read
+
+# Token rotation invalidates the previous pair. Do not overlap runs or cancel one mid-refresh.
+concurrency:
+  group: whoop-production-pipeline
+  cancel-in-progress: false
 
 jobs:
   run-pipeline:
@@ -29,11 +34,24 @@ jobs:
           WHOOP_CLIENT_SECRET: ${{ secrets.WHOOP_CLIENT_SECRET }}
           WHOOP_ACCESS_TOKEN: ${{ secrets.WHOOP_ACCESS_TOKEN }}
           WHOOP_REFRESH_TOKEN: ${{ secrets.WHOOP_REFRESH_TOKEN }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          WHOOP_PIPELINE_USE_POSTGRES: ${{ secrets.WHOOP_PIPELINE_USE_POSTGRES }}
+          WHOOP_PIPELINE_USE_LIVE_CLIENT: "true"
         run: |
+          if [ "$WHOOP_PIPELINE_USE_POSTGRES" != "true" ] || [ -z "$DATABASE_URL" ]; then
+            echo "Set WHOOP_PIPELINE_USE_POSTGRES=true and DATABASE_URL in repository secrets."
+            exit 1
+          fi
+          if [ -z "$WHOOP_CLIENT_ID" ] || [ -z "$WHOOP_CLIENT_SECRET" ]; then
+            echo "Set WHOOP_CLIENT_ID and WHOOP_CLIENT_SECRET in repository secrets."
+            exit 1
+          fi
           docker run --rm \
             -e WHOOP_CLIENT_ID \
             -e WHOOP_CLIENT_SECRET \
             -e WHOOP_ACCESS_TOKEN \
             -e WHOOP_REFRESH_TOKEN \
-            -e WHOOP_PIPELINE_USE_LIVE_CLIENT=true \
+            -e DATABASE_URL \
+            -e WHOOP_PIPELINE_USE_POSTGRES \
+            -e WHOOP_PIPELINE_USE_LIVE_CLIENT \
             whoop-pipeline

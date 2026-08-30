@@ -54,11 +54,11 @@ unified daily view; modeling and hosted services are intentionally out of scope 
 ### Current architecture
 
 ```text
-WHOOP v2 (manual credentials, runtime only)
+WHOOP v2 (explicit live opt-in; rotating tokens persisted for scheduled runs)
   -> rate-limit-aware client + incremental sync
   -> data/bronze/<record-type>/<pull-date>.jsonl
   -> typed pandas silver transforms + Pandera contracts
-  -> data/processed/whoop.db
+  -> local DuckDB (default) OR private Postgres whoop schema (explicit opt-in)
        cycles | recovery | sleep | workouts | daily_summary view
        -> dbt marts (mart_daily_features: rolling averages, lags, rest-day recency)
 ```
@@ -88,7 +88,7 @@ pipeline runnable end to end instead of only by hand.
 
 - `dbt/` is a dbt project that declares `cycles`, `recovery`, `sleep`, `workouts`, and
   `daily_summary` as **sources** (Phase 1's Python code owns that logic; dbt only builds on
-  top of it) and defines `mart_daily_features`, the feature set the Phase 3 recovery-prediction
+  top of it) and defines `mart_daily_features`, the feature set the Phase 4 recovery-prediction
   model will consume.
 - `src/whoop_pipeline/orchestration/` wires the Phase 1 functions into Dagster software-defined
   assets: `raw_whoop_data -> bronze_partitions -> silver_frames -> gold_tables ->
@@ -105,6 +105,22 @@ pipeline runnable end to end instead of only by hand.
 
 Full details, including how to run the asset graph locally with zero credentials, are in
 [docs/orchestration.md](docs/orchestration.md).
+
+## Phase 3: production hardening
+
+The scheduled pipeline can now retain history, checkpoints, feature marts, and rotating WHOOP
+tokens in Postgres. Local fixture development still defaults to DuckDB with no credentials.
+Production requires both explicit opt-ins: `WHOOP_PIPELINE_USE_LIVE_CLIENT=true` and
+`WHOOP_PIPELINE_USE_POSTGRES=true`, plus `DATABASE_URL` and WHOOP bootstrap credentials.
+
+Alembic owns the private `whoop` schema. Gold writes and the checkpoint commit together, so
+failed processing cannot skip a sync window. Stored token pairs take precedence over bootstrap
+secrets and are refreshed before expiry. The dbt production target uses the same database.
+The workflow serializes runs to protect token rotation; bronze files remain ephemeral in CI.
+
+See [SESSION_3_SUMMARY.md](SESSION_3_SUMMARY.md) for the verified offline results and
+[NEXT_STEPS_FOR_HUMAN.md](NEXT_STEPS_FOR_HUMAN.md) for the required real-Postgres smoke test,
+Docker build, and secret setup. **No live WHOOP or Postgres connection was made during development.**
 
 ### Install and verify
 
@@ -136,6 +152,7 @@ Local `.env`, bronze files, sync state, and DuckDB databases are ignored by Git.
 
 ### Scope
 
-As of Phase 2, dbt feature marts and Dagster/Docker/scheduled-CI orchestration are in place.
-Still explicitly out of scope: machine learning, Postgres (deferred until a serving layer
-actually needs one -- likely Phase 3, alongside MLflow), dashboards, LangChain, and Databricks.
+As of Phase 3, persistent Postgres gold/checkpoint/token storage and the production dbt target
+are implemented alongside the safe local defaults. Real Postgres and Docker verification remain
+operator steps. Phase 4 is the ML modeling suite; dashboards, LangChain, and Databricks remain
+out of scope.

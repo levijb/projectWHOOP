@@ -1,125 +1,199 @@
-# Orchestration: dbt marts + Dagster + Docker + scheduled CI
+# Orchestration and persistent storage
 
-This describes the Phase 2 layer built on top of Phase 1's ingestion/storage/validation code
-(see [docs/data_model.md](data_model.md) for that). Nothing here reimplements Phase 1 logic --
-it wires already-tested functions into a graph and adds a feature-engineering layer on top.
+Phase 1 supplies the client, bronze files, transforms, validation, and DuckDB loader. Phase 2
+adds dbt and Dagster. Phase 3 adds durable Postgres storage and unattended token refresh.
+Phase 4 is the ML modeling suite consuming `mart_daily_features`.
 
-## The asset graph
+## Asset graph
 
 ```text
 raw_whoop_data -> bronze_partitions -> silver_frames -> gold_tables -> mart_daily_features
 ```
 
-| Asset | What it does | Defined in |
-|---|---|---|
-| `raw_whoop_data` | Fetches the four WHOOP v2 collections for the incremental sync window, via the injected `whoop` resource. | `src/whoop_pipeline/orchestration/assets.py` |
-| `bronze_partitions` | Writes atomic JSONL partitions and advances sync state (Phase 1's `write_bronze_pull`/`update_sync_state`), then passes the records through unchanged. | same |
-| `silver_frames` | Flattens raw records into typed DataFrames via Phase 1's `flatten_*` functions. | same |
-| `gold_tables` | Validates with Pandera and idempotently upserts into DuckDB via Phase 1's `load_silver_frames`. | same |
-| `mart_daily_features` | The dbt model computing ML features on top of `daily_summary`. Represented as a real Dagster asset (via `dagster-dbt`'s `@dbt_assets`), not a subprocess call hidden from the graph. | `src/whoop_pipeline/orchestration/dbt_assets.py`, `dbt/models/marts/mart_daily_features.sql` |
+| Asset | Behavior |
+|---|---|
+| `raw_whoop_data` | Reads the backend's checkpoint and fetches four collections through the injected `whoop` resource. The first run requests 180 days; subsequent runs overlap the last successful UTC date. |
+| `bronze_partitions` | Writes atomic local JSONL partitions. Does **not** advance the checkpoint. |
+| `silver_frames` | Flattens the four collections and carries the pull date forward. |
+| `gold_tables` | Validates every frame, replaces matching IDs, and records the checkpoint only after successful gold writes. |
+| `mart_daily_features` | Runs `dbt build` through `dagster-dbt`, retaining model lineage and dbt tests. |
 
-The dbt project's five sources (`cycles`, `recovery`, `sleep`, `workouts`, `daily_summary`) are
-mapped to the single upstream `gold_tables` asset via each source table's `meta.dagster.asset_key`
-in `dbt/models/staging/sources.yml`, so Dagster's lineage correctly shows the dbt layer
-depending on the Python-produced gold tables.
+The five dbt sources map to `gold_tables` through `meta.dagster.asset_key`. Python owns the
+gold tables and daily-summary view; dbt owns only derived features. Its existing 7-cycle
+windows (not strictly calendar days), lag, sleep-debt trend, and rest-day recency remain.
+Postgres uses `extract(dow ... at time zone 'UTC')`; a running `max` of the monotonically
+increasing rest-day index replaces DuckDB-only `IGNORE NULLS`.
 
-## The WHOOP data source is swappable, safely
+## Two independent, explicit opt-ins
 
-`raw_whoop_data` takes a `whoop` resource typed as the `WhoopDataSource` protocol
-(`src/whoop_pipeline/orchestration/resources.py`):
+| WHOOP live flag | Postgres flag | Source | Gold/checkpoint | dbt |
+|---|---|---|---|---|
+| unset/false | unset/false | fixtures | local DuckDB + JSON | dev |
+| true | unset/false | live, supplied access token | local DuckDB + JSON | dev |
+| unset/false | true | fixtures | Postgres | prod |
+| true | true | live, persistent rotating tokens | Postgres | prod |
 
-- `FixtureWhoopResource` returns Phase 1's static `tests/fixtures/*.json`, ignoring the
-  requested date window. This is the **default**.
-- `LiveWhoopResource` wraps the real, tested `WhoopClient`.
+Flags are `WHOOP_PIPELINE_USE_LIVE_CLIENT` and `WHOOP_PIPELINE_USE_POSTGRES`. Each recognizes
+`true`, `1`, or `yes`, case-insensitively. Postgres also requires `DATABASE_URL`.
+**Credentials or a URL alone never enable either path.** Both original resource-default
+regressions are retained and extended. A Postgres-only run intentionally writes fixtures;
+do not use that combination against your production database.
 
-**The default is controlled by `WHOOP_PIPELINE_USE_LIVE_CLIENT`, not by whether
-`WHOOP_ACCESS_TOKEN` happens to be set.** This is deliberate, not a stylistic choice: Dagster's
-CLI auto-loads a `.env` file from the current working directory, and this repo has a real one
-(for the pre-existing notebooks/manual workflow) containing a real access token. An earlier
-version of this code chose the live resource whenever `WHOOP_ACCESS_TOKEN` was present in the
-environment -- which meant a plain `dagster job execute` run from this directory silently
-picked up the real `.env` and attempted a live call to `api.prod.whoop.com`. It only failed
-because of an unrelated local network/SSL issue, not because of any safeguard in the code. Set
-`WHOOP_PIPELINE_USE_LIVE_CLIENT=true` explicitly (only the scheduled CI workflow does this) to
-opt into the live client; nothing else does.
+Dagster CLI auto-loads the working directory's `.env`. The live resource itself does not
+load dotenv. URL fields use Dagster `EnvVar` references so resource configuration does not
+embed the password. Default/import-time dbt manifest generation explicitly uses `dev`;
+only the opted-in execution resource selects `prod`.
 
-`data_dir`/`database_path` are likewise injected via a `PipelinePathsResource`, defaulting to
-Phase 1's real `data/` layout but overridable (both tests and the pytest materialization test
-redirect these to a tmp_path).
+## Storage and migration contract
 
-## Running locally with `dagster dev`
+`GoldStorageBackend` is the small injected protocol. `LocalBackend` delegates to Phase 1's
+DuckDB loader and JSON state helpers. `PostgresBackend` delegates to SQLAlchemy Core.
 
-```bash
-pip install -e ".[dev]"
+Postgres gold and checkpoint writes share one transaction. Validation precedes engine
+creation, and inserts/deletes are chunked in groups of 500 records. The key behavior matches
+DuckDB: incoming IDs replace existing rows; unrelated history is retained. Runtime writes
+use declared SQLAlchemy tables, never pandas' implicit table creation.
+
+Local DuckDB commits before its JSON checkpoint is updated. A crash between these operations
+causes a safe replay, not skipped gold. A dbt failure does not undo committed gold; the next
+run rebuilds the complete mart. Bronze files and Dagster intermediates are still ephemeral in
+the scheduled container; **Postgres persists gold, sync state, current tokens, and the mart,
+not the raw archive**.
+
+Alembic revision `0001` creates the private `whoop` schema, four gold tables, `sync_state`,
+`whoop_tokens`, and `daily_summary`. Cycle/user identifiers use 64-bit integers. The
+checkpoint is a SQL date; timestamps use timezone-aware Postgres types. The migration's
+daily view matches Phase 1's latest main-sleep and interval-assigned workout policy.
+The version tracker is `whoop_alembic_version` in the connection's default schema.
+
+No migration runs on import or as an ingestion side effect. An operator explicitly runs
+`alembic upgrade head` before first use and when new revisions ship. The Alembic CLI also
+requires the Postgres flag plus URL; even ambient credentials cannot trigger it accidentally.
+URL objects avoid percent-password interpolation problems in Alembic configuration.
+Do not edit applied revisions. The initial revision was completed before deployment here.
+
+The `whoop` schema revokes access from `PUBLIC`. Use an owner/migration role initially,
+or provision a restricted pipeline role with the necessary schema/table privileges afterward.
+Do not expose this schema in Supabase's Data API or grant it to `anon`/`authenticated`.
+Tokens are stored as database text: private schema access, protected backups, and database
+credentials are essential. This is not application-level encryption.
+
+## Token lifecycle
+
+Only the live **and** Postgres combination automatically refreshes tokens:
+
+1. Read the stored access/refresh pair and expiry, preferring it over bootstrap environment values.
+2. If there is no stored pair, treat bootstrap expiry as unknown and refresh immediately.
+   Only the client ID, client secret, and refresh token are needed for this first refresh.
+3. Reuse a stored pair more than five minutes from expiry. Otherwise refresh with
+   `scope=offline`, validate both rotated tokens and a positive finite `expires_in`,
+   then persist the pair and absolute UTC expiry **before** fetching collections.
+4. On refresh failure, do not overwrite the pair or fall back to stale bootstrap secrets.
+
+The local live-only path retains the supplied access-token behavior; it never rotates an
+unpersisted refresh token. The fixture path reads no credentials. The human-only
+`scripts/authenticate.py` now returns both bootstrap tokens and their expiry, but is never
+invoked by scheduled jobs or tests.
+
+WHOOP invalidates the prior tokens on refresh, so the workflow serializes runs with
+`concurrency` and `cancel-in-progress: false`. This is a **single-account, single-writer**
+pipeline. Do not overlap local production runs with Actions or share its refresh token with
+another refresher. There is no distributed refresh lock for unrelated processes.
+
+The WHOOP exchange and database save cannot be one atomic transaction. A crash or database
+failure after rotation but before persistence can require human reauthorization. No automatic
+retry of an ambiguous exchange or API 401 is performed. Requests that run beyond the token's
+remaining lifetime can also fail; the next run safely resumes from the checkpoint.
+
+## Safe local execution
+
+Install with `python -m pip install -e ".[dev]"`. From the project root, in PowerShell:
+
+```powershell
+$env:WHOOP_PIPELINE_USE_LIVE_CLIENT = "false"
+$env:WHOOP_PIPELINE_USE_POSTGRES = "false"
+$env:WHOOP_PIPELINE_DATA_DIR = "data/fixture_dev"
+$env:WHOOP_DUCKDB_PATH = (Join-Path (Get-Location) "data/fixture_dev/processed/whoop.db")
 dagster dev
 ```
 
-With no `WHOOP_ACCESS_TOKEN` or `WHOOP_PIPELINE_USE_LIVE_CLIENT` set, materializing the full
-asset graph in the Dagster UI uses `FixtureWhoopResource` and completes with zero credentials,
-writing to the real `data/` directory by default (override `paths` resource config in the UI to
-redirect elsewhere). `dagster dev` picks up the `[tool.dagster] module_name` entry in
-`pyproject.toml` automatically.
+Materialize the full graph in the UI, or run once:
 
-To run the same graph once, non-interactively:
-
-```bash
+```powershell
 dagster job execute -j whoop_pipeline_job -m whoop_pipeline.orchestration.definitions
 ```
 
-## Running the dbt project directly
+The explicit scratch paths prevent fixture runs from mixing with your real local data.
+For direct dbt work, after building fixture gold:
 
-```bash
-export WHOOP_DUCKDB_PATH=/absolute/path/to/data/processed/whoop.db
-dbt build --project-dir dbt --profiles-dir dbt
+```powershell
+whoop-dbt build --target dev
+whoop-dbt docs generate --target dev
 ```
 
-`WHOOP_DUCKDB_PATH` defaults to `../data/processed/whoop.db` (relative to the dbt project
-directory) if unset -- see `dbt/profiles.yml`. `tests/test_dbt_mart.py` overrides it to a
-tmp_path database built from Phase 1's fixtures, so dbt is never run against real data in CI.
+The original `dbt build --project-dir dbt --profiles-dir dbt --target dev` remains supported.
+For production, use `whoop-dbt build --target prod` after the operator setup below. This
+wrapper derives host, decoded user/password, database, port, and TLS options from
+`DATABASE_URL` in the child environment. It never prints shell exports or writes a password
+file. `scripts/parse_database_url_for_dbt.py` is a compatibility entry point for that wrapper,
+not an export generator.
 
-`accepted_range` is a small custom generic test in `dbt/tests/generic/`, not the `dbt_utils`
-package -- this keeps the dbt project's own dependencies at zero, so `dbt build` never needs
-network access to a package registry.
+Both SQLAlchemy and dbt default to `sslmode=require` and a 10-second connection timeout.
+Supported URL options are `sslmode`, `sslrootcert`, and `connect_timeout`; unsupported
+options fail instead of silently making the two clients use different settings.
+Use `verify-full` plus an appropriate CA for server identity verification.
+The dbt password variable is prefixed `DBT_ENV_SECRET_` for dbt's log scrubbing.
 
-## Docker
+## Docker and schedule
 
 ```bash
 docker build -t whoop-pipeline .
-docker run --rm whoop-pipeline                                    # uses fixtures, no creds needed
-docker run --rm -e WHOOP_PIPELINE_USE_LIVE_CLIENT=true \
-  -e WHOOP_ACCESS_TOKEN=... -e WHOOP_CLIENT_ID=... \
-  -e WHOOP_CLIENT_SECRET=... -e WHOOP_REFRESH_TOKEN=... \
-  whoop-pipeline                                                  # real pull
+docker run --rm whoop-pipeline
 ```
 
-The image installs the package non-editably (`pip install .`), copies `dbt/` separately since
-it isn't part of the wheel, and pre-generates the dbt manifest at build time (`dbt parse`) so
-the container never needs `dagster dev`'s manifest-regeneration behavior. It runs
-`dagster job execute` once and exits -- there's no persistent daemon or webserver, since an
-always-on host is out of scope for a personal project.
+The package is installed non-editably. The image includes its README/license build inputs,
+dbt project, Alembic revisions, and fixtures. It pre-parses the safe dev manifest and executes
+one Dagster job. `.dockerignore` excludes dotenv files, local wearable data, Git history,
+virtual environments, and generated artifacts. The build takes no production credentials.
 
-**Not verified with a literal `docker build`:** Docker isn't installed on the machine this was
-built on. Every command the Dockerfile runs (`pip install .` non-editably, `dbt parse`,
-`dagster job execute -j whoop_pipeline_job`) was verified working end-to-end outside a
-container, from a clean directory with no `.env` present, using the fixture resource. The
-Dockerfile itself should be verified with a real `docker build` before relying on it.
+After the human migration/smoke test and with credentials already in the caller's environment:
 
-## Scheduled CI
+```bash
+docker run --rm \
+  -e WHOOP_PIPELINE_USE_LIVE_CLIENT=true -e WHOOP_PIPELINE_USE_POSTGRES=true \
+  -e DATABASE_URL -e WHOOP_CLIENT_ID -e WHOOP_CLIENT_SECRET \
+  -e WHOOP_ACCESS_TOKEN -e WHOOP_REFRESH_TOKEN whoop-pipeline
+```
 
-`.github/workflows/scheduled-pipeline.yml` is separate from `ci.yml` (which stays push/PR-only,
-lint+test, no secrets, and is untouched by this change). It builds the Docker image and runs it
-with four secrets (`WHOOP_CLIENT_ID`, `WHOOP_CLIENT_SECRET`, `WHOOP_ACCESS_TOKEN`,
-`WHOOP_REFRESH_TOKEN`) plus `WHOOP_PIPELINE_USE_LIVE_CLIENT=true`. It **cannot succeed yet** --
-those secrets don't exist in the repo. See `NEXT_STEPS_FOR_HUMAN.md` for how to add them.
+The separate scheduled workflow runs daily at 06:00 UTC. It requires the
+`WHOOP_PIPELINE_USE_POSTGRES` repository secret to equal `true`, along with
+`DATABASE_URL` and WHOOP credentials. Missing configuration fails before the container can
+fall back to local storage. `ci.yml` remains unchanged and needs no secrets.
 
-Two characteristics of `schedule:` triggers worth knowing, not bugs:
-- GitHub's cron scheduling is best-effort and can be delayed under load.
-- Scheduled workflows on public repos are automatically disabled after 60 days with no
-  repository push activity (pushing anything re-enables them).
+GitHub schedules can be delayed and public-repository schedules can be disabled after 60
+days of inactivity. No workflow was dispatched or secret configured in this session.
+See [NEXT_STEPS_FOR_HUMAN.md](../NEXT_STEPS_FOR_HUMAN.md) for activation and smoke-test steps.
 
-Also worth knowing: the container has no persistent volume. Each scheduled run starts from an
-empty `data/` directory inside the ephemeral Actions runner, so incremental sync state does not
-carry over between scheduled runs as written today -- every run re-pulls the initial
-`--days-back` window rather than a true incremental sync. Giving the scheduled job real
-persistence (a volume, cache, or the eventual Postgres/object-storage serving layer) is
-follow-up work, not solved by this session.
+## Verification boundaries
+
+Tests migrate temporary SQLite files with **the real Alembic revision**, not
+`metadata.create_all`. They cover idempotency, corrected/partial data, nullable values,
+restart persistence, transaction rollback, checkpoint failures, token rotation, and resource
+selection. SQLite does not implement the Postgres daily view or verify its permissions,
+TLS, locking, or pooler behavior.
+
+The actual dbt `prod` model compiles with `psycopg2.connect` blocked. Its SQL and the
+migration's Postgres daily view also execute on fixture DuckDB for a semantic comparison.
+The complete local Dagster/dbt graph is exercised against temporary data. Tests block external
+Python sockets and native psycopg2 connections; Windows asyncio loopback remains allowed.
+The suite strips inherited credentials before collection and disables dbt telemetry.
+
+A non-editable wheel and the one-shot Dagster/dbt commands are additionally checked from a
+scratch directory without `.env`. **No live Postgres or WHOOP connection is part of this
+verification. Docker itself remains unbuilt/unverified.**
+
+Implementation references:
+[WHOOP OAuth and rotation](https://developer.whoop.com/docs/developing/oauth/),
+[dbt Postgres profiles](https://docs.getdbt.com/docs/local/connect-data-platform/postgres-setup),
+[dbt secret environment variables](https://docs.getdbt.com/reference/dbt-jinja-functions/env_var),
+[Dagster dbt integration](https://docs.dagster.io/integrations/libraries/dbt/dagster-dbt).

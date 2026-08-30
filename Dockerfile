@@ -6,9 +6,8 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install the package first (better layer caching): only pyproject.toml + src/ are needed for
-# `pip install .`, so dependency layers don't get invalidated by dbt/test-fixture changes.
-COPY pyproject.toml ./
+# Install build metadata and source first so dbt/test-fixture edits don't invalidate this layer.
+COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-cache-dir .
 
@@ -16,16 +15,21 @@ RUN pip install --no-cache-dir .
 # src/whoop_pipeline), so it's copied separately and pointed to explicitly.
 COPY dbt ./dbt
 ENV WHOOP_DBT_PROJECT_DIR=/app/dbt
+ENV DBT_SEND_ANONYMOUS_USAGE_STATS=false
 
 # Pre-generate the dbt manifest at build time. dagster_dbt.DbtProject.prepare_if_dev() only
 # regenerates the manifest under `dagster dev`; this one-shot container never runs that, so the
 # manifest must already exist on disk before `dagster job execute` imports the asset module.
-RUN dbt parse --project-dir dbt --profiles-dir dbt
+RUN dbt parse --project-dir dbt --profiles-dir dbt --target dev
+
+# Migrations are an explicit operator step, never an ingestion/import side effect.
+COPY alembic.ini ./
+COPY alembic ./alembic
 
 # Copied so this image can be verified locally with zero WHOOP credentials (the whoop resource
 # defaults to fixtures unless WHOOP_PIPELINE_USE_LIVE_CLIENT is explicitly set -- see
 # src/whoop_pipeline/orchestration/definitions.py). Real scheduled runs set that flag plus the
-# three WHOOP_* secrets and never touch these.
+# WHOOP bootstrap secrets and never touch these.
 COPY tests/fixtures ./tests/fixtures
 
 ENV DAGSTER_HOME=/app/.dagster_home
