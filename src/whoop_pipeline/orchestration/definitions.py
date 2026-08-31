@@ -29,6 +29,7 @@ from whoop_pipeline.storage.database import (
 
 from .assets import bronze_partitions, gold_tables, raw_whoop_data, silver_frames
 from .dbt_assets import DBT_PROJECT_DIR, feature_marts
+from .model_assets import ModelingResource, daily_model_update
 from .resources import (
     FixtureWhoopResource,
     GoldStorageBackend,
@@ -42,6 +43,10 @@ from .resources import (
 ALL_ASSETS = [raw_whoop_data, bronze_partitions, silver_frames, gold_tables, feature_marts]
 
 whoop_pipeline_job = define_asset_job(name="whoop_pipeline_job", selection=ALL_ASSETS)
+# Deliberately separate: the scheduled ingestion job's selection and workflow stay unchanged.
+whoop_model_update_job = define_asset_job(
+    name="whoop_model_update_job", selection=[daily_model_update]
+)
 
 
 def _default_storage_resource() -> GoldStorageBackend:
@@ -76,12 +81,13 @@ def _default_dbt_resource() -> DbtCliResource:
 
 
 defs = Definitions(
-    assets=ALL_ASSETS,
-    jobs=[whoop_pipeline_job],
+    assets=[*ALL_ASSETS, daily_model_update],
+    jobs=[whoop_pipeline_job, whoop_model_update_job],
     resources={
         "whoop": _default_whoop_resource(),
         "paths": PipelinePathsResource(data_dir=os.environ.get("WHOOP_PIPELINE_DATA_DIR", "data")),
         "storage": _default_storage_resource(),
         "dbt": _default_dbt_resource(),
+        "modeling": ModelingResource(),
     },
 )

@@ -20,6 +20,7 @@ from whoop_pipeline.orchestration.assets import (
     silver_frames,
 )
 from whoop_pipeline.orchestration.dbt_assets import DBT_PROJECT_DIR, feature_marts
+from whoop_pipeline.orchestration.model_assets import ModelingResource, daily_model_update
 from whoop_pipeline.orchestration.resources import (
     FixtureWhoopResource,
     LocalBackend,
@@ -37,17 +38,27 @@ def test_full_asset_graph_materializes_with_fixture_resource_and_zero_credential
     monkeypatch.setenv("WHOOP_DUCKDB_PATH", str(database_path))  # type: ignore[attr-defined]
 
     result = materialize(
-        [raw_whoop_data, bronze_partitions, silver_frames, gold_tables, feature_marts],
+        [
+            raw_whoop_data,
+            bronze_partitions,
+            silver_frames,
+            gold_tables,
+            feature_marts,
+            daily_model_update,
+        ],
         resources={
             "whoop": FixtureWhoopResource(fixtures_dir=str(FIXTURES_DIR)),
             "paths": PipelinePathsResource(data_dir=str(data_dir)),
             "storage": LocalBackend(data_dir=str(data_dir)),
             "dbt": DbtCliResource(project_dir=str(DBT_PROJECT_DIR)),
+            "modeling": ModelingResource(tracking_dir=str(tmp_path / "registry")),
         },
     )
 
     assert result.success
     assert database_path.exists()
+    assert result.output_for_node("daily_model_update")["status"] == "disabled"
+    assert not (tmp_path / "registry").exists()
 
 
 def test_definitions_default_to_fixture_resource_without_explicit_opt_in(

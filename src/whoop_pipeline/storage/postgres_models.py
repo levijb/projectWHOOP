@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -139,4 +140,33 @@ WHOOP_TOKENS_TABLE = Table(
     Column("refresh_token", String, nullable=False),
     Column("expires_at", DateTime(timezone=True), nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+
+# cycle_id is the FEATURE/ORIGIN cycle. The unknown next ID is resolved when it arrives.
+# A retry must not replace a forecast after its outcome is observable.
+PREDICTIONS_TABLE = Table(
+    "predictions",
+    METADATA,
+    Column("cycle_id", BigInteger, primary_key=True),
+    Column("model_name", String, primary_key=True),
+    Column("model_version", String, nullable=False),
+    Column("target_cycle_id", BigInteger, nullable=True),
+    Column("origin_at", DateTime(timezone=True), nullable=False),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("predicted_value", Float, nullable=False),
+    Column("ci_lower", Float, nullable=False),
+    Column("ci_upper", Float, nullable=False),
+    Column("actual_value", Float, nullable=True),
+    Column("error", Float, nullable=True),
+    CheckConstraint(
+        "predicted_value >= 0 AND predicted_value <= 100", name="prediction_score_range"
+    ),
+    CheckConstraint(
+        "ci_lower >= 0 AND ci_upper <= 100 AND ci_lower <= ci_upper",
+        name="prediction_interval_range",
+    ),
+    CheckConstraint(
+        "actual_value IS NULL OR (actual_value >= 0 AND actual_value <= 100)",
+        name="prediction_actual_range",
+    ),
 )
