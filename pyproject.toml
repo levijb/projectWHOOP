@@ -28,7 +28,13 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+modeling = [
+  "filelock>=3.16,<4",
+  "mlflow>=3.7,<4",
+  "scikit-learn>=1.6,<2",
+]
 dev = [
+  "projectwhoop[modeling]",
   "mypy>=1.11,<2",
   "pandas-stubs>=2.1,<3",
   "pre-commit>=3.8,<5",
@@ -47,6 +53,7 @@ notebooks = [
 [project.scripts]
 whoop-download = "whoop_pipeline.cli:main"
 whoop-dbt = "whoop_pipeline.dbt_cli:main"
+whoop-model-demo = "whoop_pipeline.modeling.demo:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/whoop_pipeline"]
@@ -90,7 +97,7 @@ packages = ["whoop_pipeline"]
 warn_unused_ignores = true
 
 [[tool.mypy.overrides]]
-module = ["duckdb.*", "pandera.*"]
+module = ["duckdb.*", "pandera.*", "sklearn.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

@@ -8,6 +8,6 @@
   {% if target.type == 'postgres' %}
     cast(extract(dow from {{ column }} at time zone 'UTC') as integer)
   {% else %}
-    dayofweek({{ column }})
+    dayofweek({{ column }} at time zone 'UTC')
   {% endif %}
 {% endmacro %}

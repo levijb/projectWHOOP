@@ -46,3 +46,8 @@ dbt/.user.yml
 
 # Dagster local dev instance state
 .dagster_home/
+
+# Local MLflow registry, artifacts, and synthetic modeling output
+.modeling/
+mlruns/
+mlflow.db*
