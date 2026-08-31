@@ -1,9 +1,9 @@
 # Modeling capability and deliberate activation
 
-**Real history was only two rows at the Phase 4 handoff. No real model was trained, and no
-real WHOOP or Postgres connection was made.** The operator reported successful Supabase
-ingestion and a no-duplication retry; this session did not repeat those checks. Synthetic
-benchmarks test the software, not the reliability of personal forecasts or health flags.
+**Models are validated on synthetic data, not trained for real personal forecasts.**
+Synthetic benchmarks test the software, not the reliability of personal forecasts or health
+flags. Real training requires sufficient history and deliberate activation through
+[SETUP.md](../SETUP.md#model-readiness).
 
 ## Local synthetic experiment and MLflow
 
@@ -37,8 +37,8 @@ Synthetic experiments/models are separated from real ones and the demo sets no a
 Artifacts use cloudpickle to retain custom preprocessing/incremental state. **Only load
 artifacts produced by this trusted local checkout/store**: unpickling can execute code.
 Keep artifacts private and use the matching project/Python environment. Dependencies are
-downloaded at installation; model execution is offline. MLflow 3.15.2 required pandas <3,
-so installation resolved pandas 2.3.3; the existing suite was rechecked on that combination.
+downloaded at installation; model execution is offline. MLflow 3.15.2 requires pandas <3;
+the verified combination uses pandas 2.3.3.
 
 ## Exact feature and target contract
 
@@ -181,7 +181,7 @@ then deliberately run:
 dagster job execute -m whoop_pipeline.orchestration.definitions -j whoop_model_update_job -c your-reviewed-config.yaml
 ```
 
-**Those real-data commands were not run this session. Do not add modeling to Actions yet.**
+**These commands access real data. Keep modeling out of Actions until readiness is established.**
 Use one persistent local MLflow directory and one writer. A local file lock rejects overlapping
 Dagster updates sharing that directory; it cannot coordinate separate hosts/directories.
 Activation precedes SQL prediction insertion so a failed insert retries without another
@@ -203,8 +203,8 @@ genuine walk-forward results, a simple persistence reference, interval coverage,
 prospective errors before trusting forecasts or promoting the challenger.
 
 Phase 5 can build Streamlit and monitoring from `predictions` and MLflow, including clear
-empty/insufficient-history states. Lower-priority KMeans/Holt work is deferred. No dashboard,
-Grafana, LangChain, Databricks, hosted service, secret change, or schedule change was made.
+empty/insufficient-history states. KMeans/Holt, Grafana, LangChain, Databricks, and hosted
+modeling services remain outside the implemented scope.
 
 References: [MLflow backends/registry](https://mlflow.org/docs/latest/self-hosting/architecture/backend-store/),
 [model persistence](https://mlflow.org/docs/latest/api_reference/python_api/mlflow.sklearn.html),

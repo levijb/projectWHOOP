@@ -46,8 +46,30 @@ dbt/.user.yml
 
 # Dagster local dev instance state
 .dagster_home/
+.tmp_dagster_home_*/
 
 # Local MLflow registry, artifacts, and synthetic modeling output
 .modeling/
 mlruns/
 mlflow.db*
+
+# Local databases and sidecars (fixtures belong in text formats, not database files).
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.duckdb
+*.duckdb.*
+
+# Private working notes; keep durable instructions in SETUP.md and docs/.
+/.session-notes/
+# Catch accidental root-level reports as well as the archived copies.
+/SESSION_*.md
+/QA_REPORT*.md
+/RECONCILIATION_REPORT*.md
+/NEXT_STEPS_FOR_HUMAN.md
+/*_SUMMARY.md
+/*_REPORT.md
+/*_REPORT_*.md

@@ -1,7 +1,7 @@
 """Backend tests on a disposable SQLite file provisioned by the real Alembic revision.
 
 Transactional operations are shared with production. Postgres dialect/view/TLS/permissions
-still require the manual smoke test documented in NEXT_STEPS_FOR_HUMAN.md.
+still require the manual smoke test documented in SETUP.md.
 """
 
 from __future__ import annotations

@@ -79,7 +79,7 @@ The detailed field contract and aggregation choices are in [docs/data_model.md](
 
 `src/whoop_client.py` and `src/whoop_oauth.py` are the original, pre-Phase-1 client and OAuth
 helpers. They're kept for now because `notebooks/WHOOP_EDA.ipynb` still imports them directly;
-see [NEXT_STEPS_FOR_HUMAN.md](NEXT_STEPS_FOR_HUMAN.md) for the plan to retire them once that
+see [SETUP.md](SETUP.md#notebook-compatibility) for the plan to retire them once that
 notebook is migrated to `whoop_pipeline`.
 
 ## Phase 2: feature marts and orchestration
@@ -119,13 +119,14 @@ failed processing cannot skip a sync window. Stored token pairs take precedence 
 secrets and are refreshed before expiry. The dbt production target uses the same database.
 The workflow serializes runs to protect token rotation; bronze files remain ephemeral in CI.
 
-See [SESSION_3_SUMMARY.md](SESSION_3_SUMMARY.md) for the verified offline results and
-[NEXT_STEPS_FOR_HUMAN.md](NEXT_STEPS_FOR_HUMAN.md) for the required real-Postgres smoke test,
-Docker build, and secret setup. **No live WHOOP or Postgres connection was made during development.**
+See [SETUP.md](SETUP.md) for credentials, migrations, the Postgres smoke test, Docker
+verification, and GitHub Actions configuration. [Orchestration documentation](docs/orchestration.md)
+describes storage guarantees and offline verification boundaries.
 
 ### Install and verify
 
 Python 3.11 or newer is required.
+Follow [SETUP.md](SETUP.md) for environment activation and deployment instructions.
 
 ```bash
 python -m venv .venv
@@ -142,7 +143,7 @@ type, and test commands on pushes and pull requests without repository secrets.
 ### Manual data collection
 
 Real collection is deliberately not automatic. Complete the credential steps in
-[NEXT_STEPS_FOR_HUMAN.md](NEXT_STEPS_FOR_HUMAN.md), then run:
+[SETUP.md](SETUP.md#configure-whoop-credentials), then run:
 
 ```bash
 python scripts/download_whoop_data.py --days-back 180
@@ -159,10 +160,9 @@ gradient-boosting challenger are also built and tested. All use chronological ex
 validation. Local MLflow tracks experiments/model versions; Alembic revision 0002 adds the
 minimal Postgres `predictions` serving table.
 
-**Real history was only two rows at the Phase 4 handoff. No meaningful real model has been
-trained.** Seeded synthetic benchmarks do not establish real-world accuracy. The new Dagster
-model-update job is separate and disabled by default; the ingestion job and scheduled workflow
-have not been changed to train models.
+**Models are validated on synthetic data, not trained for real personal forecasts.** Real
+training requires sufficient history and deliberate activation. The separate Dagster model-update
+job is disabled by default; the scheduled ingestion workflow does not train models.
 
 ```powershell
 python -m pip install -e ".[modeling]"
@@ -171,11 +171,11 @@ mlflow ui --backend-store-uri sqlite:///.modeling/synthetic/mlflow.db --host 127
 ```
 
 See [docs/modeling.md](docs/modeling.md) for features, leakage safeguards, triggers, intervals,
-and deliberate activation; see [SESSION_4_SUMMARY.md](SESSION_4_SUMMARY.md) for synthetic results.
+and deliberate activation. See [SETUP.md](SETUP.md#model-readiness) for real-data requirements.
 
 ### Scope
 
-As of Phase 4, offline-verified modeling and guarded prediction serving are implemented
-alongside persistent ingestion and safe local defaults. The operator reports successful
-Phase 3 Supabase ingestion/idempotency checks. Phase 4 did not contact live services or train
-on real history. Streamlit and monitoring are Phase 5; LangChain and Databricks remain out of scope.
+Offline-verified modeling and guarded prediction serving complement persistent ingestion
+and safe local defaults. Supabase ingestion and duplicate-free reruns are validated; real
+model activation remains subject to the readiness checks in [SETUP.md](SETUP.md).
+Streamlit and monitoring are planned next; LangChain and Databricks remain out of scope.

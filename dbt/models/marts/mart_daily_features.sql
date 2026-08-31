@@ -4,7 +4,7 @@
     silver/gold logic is reimplemented here, only derived features on top of it.
 
     Feature set and the "low strain" threshold (8.0, on WHOOP's 0-21 strain scale) are
-    documented judgment calls; see SESSION_2_SUMMARY.md for rationale.
+    documented judgment calls; see docs/modeling.md for the feature contract.
 
     Written to compile against both the dev (DuckDB) and prod (Postgres) targets: day_of_week
     uses the day_of_week() macro (DuckDB and Postgres spell that function differently), and

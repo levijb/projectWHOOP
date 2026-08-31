@@ -4,7 +4,7 @@ Phase 1 supplies the client, bronze files, transforms, validation, and DuckDB lo
 adds dbt and Dagster. Phase 3 adds durable Postgres storage and unattended token refresh.
 Phase 4 adds the ML modeling suite consuming `mart_daily_features`, local MLflow versioning,
 and `whoop.predictions` (Alembic 0002). See [modeling.md](modeling.md) for synthetic experiments
-and deliberate activation. Real history was only two rows at this handoff.
+and deliberate activation. Model updates remain disabled until sufficient history is available.
 
 ## Asset graph
 
@@ -72,11 +72,11 @@ checkpoint is a SQL date; timestamps use timezone-aware Postgres types. The migr
 daily view matches Phase 1's latest main-sleep and interval-assigned workout policy.
 The version tracker is `whoop_alembic_version` in the connection's default schema.
 
-No migration runs on import or as an ingestion side effect. An operator explicitly runs
+No migration runs on import or as an ingestion side effect. Explicitly run
 `alembic upgrade head` before first use and when new revisions ship. The Alembic CLI also
 requires the Postgres flag plus URL; even ambient credentials cannot trigger it accidentally.
 URL objects avoid percent-password interpolation problems in Alembic configuration.
-Do not edit applied revisions. The initial revision was completed before deployment here.
+Do not edit applied revisions.
 
 The `whoop` schema revokes access from `PUBLIC`. Use an owner/migration role initially,
 or provision a restricted pipeline role with the necessary schema/table privileges afterward.
@@ -138,7 +138,7 @@ whoop-dbt docs generate --target dev
 ```
 
 The original `dbt build --project-dir dbt --profiles-dir dbt --target dev` remains supported.
-For production, use `whoop-dbt build --target prod` after the operator setup below. This
+For production, use `whoop-dbt build --target prod` after [setup](../SETUP.md). This
 wrapper derives host, decoded user/password, database, port, and TLS options from
 `DATABASE_URL` in the child environment. It never prints shell exports or writes a password
 file. `scripts/parse_database_url_for_dbt.py` is a compatibility entry point for that wrapper,
@@ -177,8 +177,7 @@ The separate scheduled workflow runs daily at 06:00 UTC. It requires the
 fall back to local storage. `ci.yml` remains unchanged and needs no secrets.
 
 GitHub schedules can be delayed and public-repository schedules can be disabled after 60
-days of inactivity. No workflow was dispatched or secret configured in this session.
-See [NEXT_STEPS_FOR_HUMAN.md](../NEXT_STEPS_FOR_HUMAN.md) for activation and smoke-test steps.
+days of inactivity. See [SETUP.md](../SETUP.md) for activation and smoke-test steps.
 
 ## Verification boundaries
 
@@ -196,11 +195,11 @@ The suite strips inherited credentials before collection and disables dbt teleme
 
 ### Postgres SQL review and embedded-engine regression
 
-The first human smoke test exposed a gap in the DuckDB cross-check: Postgres rejects the
-final `USING (cycle_id)` when a preceding sleep `JOIN ... ON` leaves both `c.cycle_id` and
-`s.cycle_id` on the join's left side. DuckDB accepted it. Both view definitions now explicitly
-join workout aggregates with `ON c.cycle_id = w.cycle_id`. Workouts have no stored `cycle_id`;
-the temporal assignment remains authoritative. This incident was not caused by `EXCLUDE`.
+Postgres rejects a final `USING (cycle_id)` when a preceding sleep `JOIN ... ON` leaves both
+`c.cycle_id` and `s.cycle_id` on the join's left side. DuckDB permits that structure, so both
+view definitions explicitly join workout aggregates with `ON c.cycle_id = w.cycle_id`.
+Workouts have no stored `cycle_id`;
+the temporal assignment remains authoritative.
 
 When reviewing raw Postgres migrations or dbt's `prod` SQL:
 
@@ -230,14 +229,14 @@ python -m pytest -q tests/test_postgres_runtime.py
 
 With that variable set, the full `pytest` suite includes these three cases. Without it, the
 existing Python-only CI still runs normally and explicitly skips the three optional cases.
-Installation uses the npm registry; test execution is offline. On this Windows machine npm
-needed Node's `--use-system-ca` option to trust the installed CA; TLS verification was not
-disabled. Native Postgres, Supabase permissions/TLS/pooler behavior, and Docker still require
-the human smoke test. See [SESSION_3_FIX_SUMMARY.md](../SESSION_3_FIX_SUMMARY.md).
+Installation uses the npm registry; test execution is offline. If npm needs access to a
+system-installed CA, configure Node's `--use-system-ca` option rather than disabling TLS
+verification. Provider permissions, TLS/pooler behavior, and Docker require environment-specific
+checks; see [SETUP.md](../SETUP.md).
 
 A non-editable wheel and the one-shot Dagster/dbt commands are additionally checked from a
 scratch directory without `.env`. **No live Postgres or WHOOP connection is part of this
-verification. Docker itself remains unbuilt/unverified.**
+verification. Verify Docker separately before deployment.**
 
 Implementation references:
 [WHOOP OAuth and rotation](https://developer.whoop.com/docs/developing/oauth/),
