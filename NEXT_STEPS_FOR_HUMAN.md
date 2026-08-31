@@ -186,4 +186,34 @@ Raw bronze files and Dagster run history remain ephemeral in scheduled container
 backfill is 180 days; Phase 3 does not migrate older local DuckDB history automatically.
 SQLite/offline SQL tests cannot verify provider permissions, real Postgres behavior, TLS,
 transaction-pooler behavior, or token rotation against the live provider. Complete these checks
-before Phase 4 assumes the deployed pipeline is persistent.
+before treating the deployed pipeline as persistent. The Phase 4 handoff reports that the
+operator completed the real Supabase pull and no-duplication retry successfully; this session
+did not repeat those live checks.
+
+## After Phase 4: gather history before deliberately enabling real modeling
+
+**Real history was only two rows at handoff. Models were built and tested on synthetic data,
+not trained meaningfully on real history.** Do not interpret synthetic runs as deployed models
+or use them to make health/training decisions.
+
+1. Review the Phase 4 commits. When ready, manually run `alembic upgrade head` with the
+   existing Postgres opt-in and updated URL. Revision **0002** adds `whoop.predictions`;
+   it does not replace/rerun applied 0001. No live migration was run this session.
+2. Continue ingestion, or deliberately perform a larger backfill. No Actions secrets or
+   scheduled workflow were changed. Keep model updates disabled while history is sparse.
+3. The guard needs **90 labeled next-cycle pairs across at least 90 days**: an initial
+   60-pair training window plus multiple future validation windows. Aim for **120-180+ days**,
+   low-recovery events in multiple folds, and acceptable missingness. Counts alone do not
+   establish model quality.
+4. Review genuine walk-forward MAE/MAPE/R², classifier precision/recall/AUC, and interval
+   coverage. Compare with a persistence forecast and collect prospective errors at a consistent
+   time; mutable historical features may differ from what was available that day.
+5. Only after review, manually enable both modeling resource switches in
+   [docs/modeling.md](docs/modeling.md), retain the Postgres opt-in, and run the separate
+   model-update job after ingestion/dbt. Use one persistent local registry and one writer.
+   **Do not wire modeling into Actions or activate a challenger automatically.**
+6. Phase 5: build Streamlit/monitoring against `predictions` and MLflow, including clear
+   insufficient-history and untrained-model states until real activation is justified.
+
+Inspect synthetic runs now with `whoop-model-demo` and `mlflow ui`; the commands and paths
+are in [docs/modeling.md](docs/modeling.md).

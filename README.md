@@ -40,9 +40,10 @@ Build an intelligent system that:
    - Make attractive, informative visualizations of health trends
    - Create dashboard to be updated daily
 
-The detailed recovery-prediction modeling spec lives in
-[Recovery_Prediciton/README.md](Recovery_Prediciton/README.md) and is later-phase work, built on
-top of the Phase 1 ingestion foundation described below.
+The original recovery-prediction spec lives in
+[Recovery_Prediciton/README.md](Recovery_Prediciton/README.md). The implemented Phase 4 design
+is documented in [docs/modeling.md](docs/modeling.md), including MLflow's registry in place
+of the original custom registry-table proposal.
 
 ---
 
@@ -150,9 +151,31 @@ python scripts/download_whoop_data.py --days-back 180
 Subsequent runs use `data/_state/sync_state.json` and overlap the last successful UTC date.
 Local `.env`, bronze files, sync state, and DuckDB databases are ignored by Git.
 
+## Phase 4: offline modeling suite
+
+Ridge and incremental SGD predict next-cycle recovery; balanced logistic regression predicts
+next-cycle recovery <=33. Robust personal-baseline anomalies, Isolation Forest, and a
+gradient-boosting challenger are also built and tested. All use chronological expanding-window
+validation. Local MLflow tracks experiments/model versions; Alembic revision 0002 adds the
+minimal Postgres `predictions` serving table.
+
+**Real history was only two rows at the Phase 4 handoff. No meaningful real model has been
+trained.** Seeded synthetic benchmarks do not establish real-world accuracy. The new Dagster
+model-update job is separate and disabled by default; the ingestion job and scheduled workflow
+have not been changed to train models.
+
+```powershell
+python -m pip install -e ".[modeling]"
+whoop-model-demo --days 180 --seed 42 --output .modeling/synthetic
+mlflow ui --backend-store-uri sqlite:///.modeling/synthetic/mlflow.db --host 127.0.0.1 --port 5000
+```
+
+See [docs/modeling.md](docs/modeling.md) for features, leakage safeguards, triggers, intervals,
+and deliberate activation; see [SESSION_4_SUMMARY.md](SESSION_4_SUMMARY.md) for synthetic results.
+
 ### Scope
 
-As of Phase 3, persistent Postgres gold/checkpoint/token storage and the production dbt target
-are implemented alongside the safe local defaults. Real Postgres and Docker verification remain
-operator steps. Phase 4 is the ML modeling suite; dashboards, LangChain, and Databricks remain
-out of scope.
+As of Phase 4, offline-verified modeling and guarded prediction serving are implemented
+alongside persistent ingestion and safe local defaults. The operator reports successful
+Phase 3 Supabase ingestion/idempotency checks. Phase 4 did not contact live services or train
+on real history. Streamlit and monitoring are Phase 5; LangChain and Databricks remain out of scope.

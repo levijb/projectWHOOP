@@ -2,16 +2,22 @@
 
 Phase 1 supplies the client, bronze files, transforms, validation, and DuckDB loader. Phase 2
 adds dbt and Dagster. Phase 3 adds durable Postgres storage and unattended token refresh.
-Phase 4 is the ML modeling suite consuming `mart_daily_features`.
+Phase 4 adds the ML modeling suite consuming `mart_daily_features`, local MLflow versioning,
+and `whoop.predictions` (Alembic 0002). See [modeling.md](modeling.md) for synthetic experiments
+and deliberate activation. Real history was only two rows at this handoff.
 
 ## Asset graph
 
 ```text
 raw_whoop_data -> bronze_partitions -> silver_frames -> gold_tables -> mart_daily_features
+                                                                        |
+                                                                        v
+                                                    daily_model_update (disabled by default)
 ```
 
 | Asset | Behavior |
 |---|---|
+| `daily_model_update` | Separate opt-in job after the feature mart: settle actuals, apply retrain triggers, update/version SGD, persist next-cycle recovery with interval. Never selected by the existing scheduled ingestion job. |
 | `raw_whoop_data` | Reads the backend's checkpoint and fetches four collections through the injected `whoop` resource. The first run requests 180 days; subsequent runs overlap the last successful UTC date. |
 | `bronze_partitions` | Writes atomic local JSONL partitions. Does **not** advance the checkpoint. |
 | `silver_frames` | Flattens the four collections and carries the pull date forward. |
